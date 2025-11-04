@@ -7,7 +7,11 @@ Rust toolkit for IC development - standardizes HTTP generation, large object sto
 - **Authentication**: Principal-based authorization with guard functions
 - **HTTP Handling**: Request/response types, routing, JSON utilities
 - **Telemetry**: Canistergeek integration for monitoring and logging
-- **Storage**: Large object storage with automatic chunking
+- **Storage**: Type-safe wrappers for IC stable storage
+- **Large Objects**: Chunked upload system for large files
+- **Inter-canister Calls**: DRY wrapper with automatic logging
+- **Large Objects**: Chunked upload system for large files
+- **Inter-canister Calls**: Safe wrappers with timeout, retries, and logging
 
 ## Installation
 
@@ -91,27 +95,210 @@ fn get_metrics() -> CanisterMetrics {
 }
 ```
 
-### 4. Large Object Storage
+### 4. Stable Storage Utilities
 
 ```rust
 use ic_dev_kit_rs::storage;
+use ic_stable_structures::{StableBTreeMap, memory_manager::*, DefaultMemoryImpl};
+use std::cell::RefCell;
 
-#[ic_cdk::init]
-fn init() {
-    storage::init(); // 1MB chunk size by default
+type Memory = VirtualMemory<DefaultMemoryImpl>;
+
+// Define REGISTRIES in your canister
+thread_local! {
+    static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
+        RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
+
+    static REGISTRIES: RefCell<StableBTreeMap<String, Vec<u8>, Memory>> = RefCell::new(
+        StableBTreeMap::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(1))),
+        )
+    );
 }
 
+// Implement StorageRegistry for your StableBTreeMap
+impl storage::StorageRegistry for StableBTreeMap<String, Vec<u8>, Memory> {
+    fn insert(&mut self, key: String, value: Vec<u8>) {
+        self.insert(key, value);
+    }
+    
+    fn get(&self, key: &String) -> Option<Vec<u8>> {
+        self.get(key)
+    }
+    
+    fn remove(&mut self, key: &String) -> Option<Vec<u8>> {
+        self.remove(key)
+    }
+}
+
+// Use storage utilities
 #[ic_cdk::update]
-fn upload_file(file_id: String, data: Vec<u8>) -> Result<String, String> {
-    storage::store(&file_id, data, Some("application/octet-stream".to_string()))
-        .map(|_| "File uploaded successfully".to_string())
-        .map_err(|e| format!("Upload failed: {}", e))
+fn save_config(config: MyConfig) -> Result<String, String> {
+    storage::with_registry_mut(&REGISTRIES, |reg| {
+        storage::save_data(reg, "config", &config)
+    })
+    .map(|_| "Config saved".to_string())
 }
 
 #[ic_cdk::query]
-fn download_file(file_id: String) -> Result<Vec<u8>, String> {
-    storage::retrieve(&file_id)
-        .map_err(|e| format!("Download failed: {}", e))
+fn get_config() -> Option<MyConfig> {
+    storage::with_registry_ref(&REGISTRIES, |reg| {
+        storage::load_data(reg, "config")
+    })
+}
+```
+
+### 5. Large Object Uploads
+
+```rust
+use ic_dev_kit_rs::large_objects;
+
+// Sequential upload (simple)
+#[ic_cdk::update]
+fn upload_chunk(data: Vec<u8>) {
+    large_objects::append_chunk(data);
+}
+
+#[ic_cdk::update]
+fn finalize_upload() -> Vec<u8> {
+    large_objects::get_buffer_data()
+}
+
+// Parallel upload (faster, chunks can arrive out of order)
+#[ic_cdk::update]
+fn upload_parallel_chunk(chunk_id: u32, data: Vec<u8>) {
+    large_objects::append_parallel_chunk(chunk_id, data);
+}
+
+#[ic_cdk::query]
+fn check_upload_complete(expected_count: u32) -> bool {
+    large_objects::parallel_chunks_complete(expected_count)
+}
+
+#[ic_cdk::update]
+fn finalize_parallel_upload() -> Result<Vec<u8>, String> {
+    large_objects::consolidate_parallel_chunks()?;
+    Ok(large_objects::get_buffer_data())
+}
+```
+
+### 6. Inter-canister Calls
+
+```rust
+use ic_dev_kit_rs::intercanister;
+use candid::{CandidType, Deserialize, Principal};
+
+#[derive(CandidType)]
+struct MyRequest {
+    data: String,
+}
+
+#[derive(CandidType, Deserialize)]
+struct MyResponse {
+    result: u64,
+}
+
+#[ic_cdk::update]
+async fn call_other_canister() -> Result<MyResponse, String> {
+    let canister_id = Principal::from_text("...").unwrap();
+    
+    let request = MyRequest {
+        data: "hello".to_string(),
+    };
+    
+    // Automatic logging and error handling
+    intercanister::call(canister_id, "my_method", request).await
+}
+
+// Call with cycles
+#[ic_cdk::update]
+async fn call_with_cycles() -> Result<String, String> {
+    intercanister::call_with_payment(
+        canister_id,
+        "paid_method",
+        my_request,
+        1_000_000, // cycles
+    ).await
+}
+```
+
+### 5. Large File Uploads
+
+```rust
+use ic_dev_kit_rs::large_objects;
+
+// Sequential upload (simple)
+#[ic_cdk::update]
+fn upload_chunk(data: Vec<u8>) {
+    large_objects::append_chunk(data);
+}
+
+#[ic_cdk::update]
+fn finalize_upload() -> Vec<u8> {
+    large_objects::get_buffer_data()
+}
+
+// Parallel upload (for better performance)
+#[ic_cdk::update]
+fn upload_parallel_chunk(chunk_id: u32, data: Vec<u8>) {
+    large_objects::append_parallel_chunk(chunk_id, data);
+}
+
+#[ic_cdk::update]
+fn finalize_parallel_upload() -> Result<usize, String> {
+    // Consolidates chunks in order and returns total size
+    large_objects::consolidate_parallel_chunks()
+}
+
+#[ic_cdk::query]
+fn upload_status() -> String {
+    let status = large_objects::storage_status();
+    format!("{}", status)
+}
+```
+
+### 6. Inter-canister Calls
+
+```rust
+use ic_dev_kit_rs::intercanister;
+use candid::Principal;
+
+#[ic_cdk::update]
+async fn call_other_canister(canister_id: Principal) -> Result<String, String> {
+    // Simple call with timeout and automatic logging
+    let result: String = intercanister::call_with_timeout(
+        canister_id,
+        "get_data",
+        (),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    
+    Ok(result)
+}
+
+#[ic_cdk::update]
+async fn call_with_retries_example(canister_id: Principal) -> Result<u64, String> {
+    // Automatically retries up to 3 times on transient errors
+    let count: u64 = intercanister::call_with_retries(
+        canister_id,
+        "get_count",
+        (),
+        3, // max retries
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    
+    Ok(count)
+}
+
+// Using the macro for less boilerplate
+#[ic_cdk::update]
+async fn macro_example(canister_id: Principal) -> Result<String, String> {
+    let result: String = ic_call!(canister_id, "method_name", ())
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(result)
 }
 ```
 
@@ -195,15 +382,53 @@ Authorization:
 
 ### Storage (`storage`)
 
-- `store()` - Store large object (auto-chunking)
-- `retrieve()` - Retrieve complete object
-- `init_chunked_upload()` - Start chunked upload
-- `store_chunk()` - Store individual chunk
-- `retrieve_chunk()` - Get specific chunk
-- `delete()` - Delete object
-- `list_objects()` - List all object IDs
-- `get_metadata()` - Get object metadata
-- `stats()` - Storage statistics
+- `save_data()` / `load_data()` - Generic type-safe storage
+- `save_hashmap()` / `load_hashmap()` - Save any HashMap<K, V>
+- `save_hashset()` / `load_hashset()` - Save any HashSet<T>
+- `save_principals()` / `load_principals()` - Convenience for Principal sets
+- `save_string_hashmap()` / `load_string_hashmap()` - Convenience for String maps
+- Works with any storage backend via `StorageRegistry` trait
+
+See [STORAGE_EXAMPLES.md](./STORAGE_EXAMPLES.md) for detailed usage patterns.
+
+### Large Objects (`large_objects`)
+
+- `append_chunk()` - Append to sequential buffer
+- `append_parallel_chunk()` - Add chunk with ID for parallel uploads
+- `parallel_chunks_complete()` - Check if all chunks received
+- `consolidate_parallel_chunks()` - Merge chunks in order
+- `get_buffer_data()` - Get final data
+- `missing_chunks()` - Check which chunks are missing
+- `storage_status()` - Get upload status
+
+### Inter-canister Calls (`intercanister`)
+
+- `call()` - Basic intercanister call with logging
+- `call_with_payment()` - Call with cycles attached
+- `call_one_way()` - Fire-and-forget notification
+- `call_no_args()` - Convenience for methods with no arguments
+- Automatic logging before/after calls
+- Consistent error formatting
+- DRY: Update timeout/retry logic in one place
+
+### Large Objects (`large_objects`)
+
+- `append_chunk()` - Add chunk to sequential buffer
+- `append_parallel_chunk()` - Add chunk with ID for parallel uploads
+- `consolidate_parallel_chunks()` - Combine parallel chunks in order
+- `get_buffer_data()` - Get and clear buffer data
+- `parallel_chunks_complete()` - Validate all chunks received
+- `storage_status()` - Monitor upload progress
+
+### Inter-canister Calls (`intercanister`)
+
+- `call_with_timeout()` - Standard call with timeout (recommended)
+- `call()` - Basic call without timeout
+- `call_with_payment()` - Call with custom cycles payment
+- `call_with_retries()` - Automatic retry on transient errors
+- `notify()` - One-way notification (no response)
+- Macros: `ic_call!()`, `ic_call_retry!()`
+- Integrated logging with telemetry module
 
 ## Examples
 

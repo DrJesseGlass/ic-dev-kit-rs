@@ -7,7 +7,9 @@
 //! - **Authentication**: Simple principal-based authorization with guards
 //! - **HTTP Handling**: Request/response utilities, routing, and JSON handling
 //! - **Telemetry**: Canistergeek integration for monitoring and logging
-//! - **Storage**: Large object storage with chunking support
+//! - **Storage**: Type-safe wrappers for IC stable storage (StableBTreeMap)
+//! - **Large Objects**: Chunked upload system for large files (ML models, media, etc.)
+//! - **Inter-canister Calls**: Safe wrappers with timeout, retries, and logging
 //!
 //! ## Quick Start
 //!
@@ -64,15 +66,55 @@
 //!
 //! ```rust,ignore
 //! use ic_dev_kit_rs::storage;
+//! use ic_stable_structures::{StableBTreeMap, DefaultMemoryImpl};
 //!
-//! #[ic_cdk::init]
-//! fn init() {
-//!     storage::init();
+//! // Define your REGISTRIES in your canister
+//! thread_local! {
+//!     static REGISTRIES: RefCell<StableBTreeMap<String, Vec<u8>, Memory>> = ...;
+//! }
+//!
+//! // Save data
+//! storage::with_registry_mut(&REGISTRIES, |reg| {
+//!     storage::save_data(reg, "my_key", &my_data)
+//! });
+//!
+//! // Load data
+//! let data: Option<MyType> = storage::with_registry_ref(&REGISTRIES, |reg| {
+//!     storage::load_data(reg, "my_key")
+//! });
+//! ```
+//!
+//! ### Large Objects
+//!
+//! ```rust,ignore
+//! use ic_dev_kit_rs::large_objects;
+//!
+//! #[ic_cdk::update]
+//! fn upload_chunk(chunk_id: u32, data: Vec<u8>) {
+//!     large_objects::append_parallel_chunk(chunk_id, data);
 //! }
 //!
 //! #[ic_cdk::update]
-//! fn store_file(id: String, data: Vec<u8>) {
-//!     storage::store(id, data, Some("application/octet-stream".to_string())).unwrap();
+//! fn finalize_upload() -> Result<Vec<u8>, String> {
+//!     large_objects::consolidate_parallel_chunks()?;
+//!     Ok(large_objects::get_buffer_data())
+//! }
+//! ```
+//!
+//! ### Inter-canister Calls
+//!
+//! ```rust,ignore
+//! use ic_dev_kit_rs::intercanister;
+//!
+//! #[ic_cdk::update]
+//! async fn call_other_canister() -> Result<String, String> {
+//!     let result: String = intercanister::call(
+//!         other_canister_id,
+//!         "get_data",
+//!         (),
+//!     ).await?;
+//!
+//!     Ok(result)
 //! }
 //! ```
 
@@ -80,6 +122,8 @@ pub mod auth;
 pub mod http;
 pub mod telemetry;
 pub mod storage;
+pub mod large_objects;
+pub mod intercanister;
 
 // Re-export common types for convenience
 pub use candid::Principal;
@@ -89,7 +133,9 @@ pub mod prelude {
     pub use crate::auth::{self, AuthError, AuthResult};
     pub use crate::http::{self, HttpError, HttpRequest, HttpResponse, HttpResult, HttpMethod};
     pub use crate::telemetry::{self, TelemetryError, TelemetryResult};
-    pub use crate::storage::{self, StorageError, StorageResult, ObjectMetadata};
+    pub use crate::storage::{self, StorageRegistry};
+    pub use crate::large_objects;
+    pub use crate::intercanister;
     pub use candid::Principal;
 }
 

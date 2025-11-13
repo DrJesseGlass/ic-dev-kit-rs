@@ -1,7 +1,6 @@
 // Telemetry module for Internet Computer canisters with Canistergeek integration
 use candid::Principal;
 use canistergeek_ic_rust::api_type::*;
-use canistergeek_ic_rust::{monitor::*, logger::*};
 use ic_cdk;
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -93,31 +92,7 @@ impl Default for MonitoringAuth {
 // ═══════════════════════════════════════════════════════════════
 
 thread_local! {
-    static MONITOR: RefCell<Option<Monitor>> = RefCell::new(None);
-    static LOGGER: RefCell<Option<Logger<CustomLogEntry>>> = RefCell::new(None);
     static AUTH: RefCell<Option<MonitoringAuth>> = RefCell::new(None);
-}
-
-// Custom log entry type - extend as needed
-#[derive(Clone, Debug)]
-pub struct CustomLogEntry {
-    pub timestamp: u64,
-    pub message: String,
-    pub level: LogLevel,
-}
-
-#[derive(Clone, Debug)]
-pub enum LogLevel {
-    Info,
-    Warning,
-    Error,
-    Debug,
-}
-
-impl LogEntry for CustomLogEntry {
-    fn timestamp(&self) -> i64 {
-        self.timestamp as i64
-    }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -126,14 +101,6 @@ impl LogEntry for CustomLogEntry {
 
 /// Initialize telemetry system
 pub fn init() {
-    MONITOR.with(|m| {
-        *m.borrow_mut() = Some(Monitor::init());
-    });
-
-    LOGGER.with(|l| {
-        *l.borrow_mut() = Some(Logger::init(1000, 3000).expect("Failed to initialize logger"));
-    });
-
     AUTH.with(|a| {
         *a.borrow_mut() = Some(MonitoringAuth::new());
     });
@@ -141,14 +108,6 @@ pub fn init() {
 
 /// Initialize with specific monitoring principals
 pub fn init_with_principals(principals: Vec<Principal>) {
-    MONITOR.with(|m| {
-        *m.borrow_mut() = Some(Monitor::init());
-    });
-
-    LOGGER.with(|l| {
-        *l.borrow_mut() = Some(Logger::init(1000, 3000).expect("Failed to initialize logger"));
-    });
-
     AUTH.with(|a| {
         *a.borrow_mut() = Some(MonitoringAuth::with_principals(principals));
     });
@@ -156,35 +115,19 @@ pub fn init_with_principals(principals: Vec<Principal>) {
 
 /// Initialize from saved state (for post-upgrade)
 pub fn init_from_saved(
-    monitor_data: Option<Vec<u8>>,
-    logger_data: Option<Vec<u8>>,
+    monitor_data: Option<canistergeek_ic_rust::monitor::PostUpgradeStableData>,
+    logger_data: Option<canistergeek_ic_rust::logger::PostUpgradeStableData>,
     principals: Option<Vec<Principal>>,
 ) {
     // Initialize monitor
-    MONITOR.with(|m| {
-        if let Some(data) = monitor_data {
-            if let Ok(decoded) = candid::decode_args::<(MonitorData,)>(&data) {
-                *m.borrow_mut() = Some(Monitor::init_with_data(decoded.0));
-            } else {
-                *m.borrow_mut() = Some(Monitor::init());
-            }
-        } else {
-            *m.borrow_mut() = Some(Monitor::init());
-        }
-    });
+    if let Some(data) = monitor_data {
+        canistergeek_ic_rust::monitor::post_upgrade_stable_data(data);
+    }
 
     // Initialize logger
-    LOGGER.with(|l| {
-        if let Some(data) = logger_data {
-            if let Ok(decoded) = candid::decode_args::<(LoggerData<CustomLogEntry>,)>(&data) {
-                *l.borrow_mut() = Some(Logger::init_with_data(1000, 3000, decoded.0).expect("Failed to initialize logger"));
-            } else {
-                *l.borrow_mut() = Some(Logger::init(1000, 3000).expect("Failed to initialize logger"));
-            }
-        } else {
-            *l.borrow_mut() = Some(Logger::init(1000, 3000).expect("Failed to initialize logger"));
-        }
-    });
+    if let Some(data) = logger_data {
+        canistergeek_ic_rust::logger::post_upgrade_stable_data(data);
+    }
 
     // Initialize auth
     AUTH.with(|a| {
@@ -201,32 +144,6 @@ pub fn init_from_saved(
 // ═══════════════════════════════════════════════════════════════
 //  Helper Functions
 // ═══════════════════════════════════════════════════════════════
-
-fn with_monitor<R, F>(f: F) -> R
-where
-    F: FnOnce(&Monitor) -> R,
-{
-    MONITOR.with(|m| {
-        let monitor_ref = m.borrow();
-        let monitor = monitor_ref
-            .as_ref()
-            .expect("Monitor not initialized - call telemetry::init() first");
-        f(monitor)
-    })
-}
-
-fn with_logger<R, F>(f: F) -> R
-where
-    F: FnOnce(&mut Logger<CustomLogEntry>) -> R,
-{
-    LOGGER.with(|l| {
-        let mut logger_ref = l.borrow_mut();
-        let logger = logger_ref
-            .as_mut()
-            .expect("Logger not initialized - call telemetry::init() first");
-        f(logger)
-    })
-}
 
 fn with_auth<R, F>(f: F) -> R
 where
@@ -278,103 +195,67 @@ pub fn list_monitoring_principals() -> Vec<Principal> {
 //  Public API - Monitoring
 // ═══════════════════════════════════════════════════════════════
 
-/// Track canister metrics (call this in update methods)
-pub fn track_metrics() {
-    with_monitor(|monitor| {
-        monitor.track_metrics();
-    });
-}
-
-/// Collect canister metrics
-pub fn collect_metrics() -> CanisterMetrics {
-    with_monitor(|monitor| monitor.collect_metrics())
+/// Update canister information (call this in update methods)
+/// This is the new API method that replaces collect_metrics
+pub fn update_information() {
+    canistergeek_ic_rust::update_information();
 }
 
 /// Get canister information
-pub fn get_information(request: GetInformationRequest) -> GetInformationResponse {
-    with_monitor(|monitor| monitor.get_information(request))
-}
-
-/// Get latest metrics
-pub fn get_latest_metrics() -> Option<CanisterMetrics> {
-    with_monitor(|monitor| monitor.get_latest_metrics())
+pub fn get_information(request: GetInformationRequest) -> GetInformationResponse<'static> {
+    canistergeek_ic_rust::get_information(request)
 }
 
 // ═══════════════════════════════════════════════════════════════
 //  Public API - Logging
 // ═══════════════════════════════════════════════════════════════
 
-/// Log an info message
+/// Log a message
+pub fn log_message(message: impl Into<String>) {
+    canistergeek_ic_rust::logger::log_message(message.into());
+}
+
+/// Log an info message (convenience wrapper)
 pub fn log_info(message: impl Into<String>) {
-    let entry = CustomLogEntry {
-        timestamp: ic_cdk::api::time(),
-        message: message.into(),
-        level: LogLevel::Info,
-    };
-    with_logger(|logger| {
-        logger.log_message(entry);
-    });
+    let msg = format!("[INFO] {}", message.into());
+    canistergeek_ic_rust::logger::log_message(msg);
 }
 
-/// Log a warning message
+/// Log a warning message (convenience wrapper)
 pub fn log_warning(message: impl Into<String>) {
-    let entry = CustomLogEntry {
-        timestamp: ic_cdk::api::time(),
-        message: message.into(),
-        level: LogLevel::Warning,
-    };
-    with_logger(|logger| {
-        logger.log_message(entry);
-    });
+    let msg = format!("[WARN] {}", message.into());
+    canistergeek_ic_rust::logger::log_message(msg);
 }
 
-/// Log an error message
+/// Log an error message (convenience wrapper)
 pub fn log_error(message: impl Into<String>) {
-    let entry = CustomLogEntry {
-        timestamp: ic_cdk::api::time(),
-        message: message.into(),
-        level: LogLevel::Error,
-    };
-    with_logger(|logger| {
-        logger.log_message(entry);
-    });
+    let msg = format!("[ERROR] {}", message.into());
+    canistergeek_ic_rust::logger::log_message(msg);
 }
 
-/// Log a debug message
+/// Log a debug message (convenience wrapper)
 pub fn log_debug(message: impl Into<String>) {
-    let entry = CustomLogEntry {
-        timestamp: ic_cdk::api::time(),
-        message: message.into(),
-        level: LogLevel::Debug,
-    };
-    with_logger(|logger| {
-        logger.log_message(entry);
-    });
+    let msg = format!("[DEBUG] {}", message.into());
+    canistergeek_ic_rust::logger::log_message(msg);
 }
 
-/// Get log messages
-pub fn get_log_messages(request: GetLogMessagesRequest) -> GetLogMessagesResponse<CustomLogEntry> {
-    with_logger(|logger| logger.get_log_messages(request))
+/// Get canister log
+pub fn get_canister_log(request: CanisterLogRequest) -> Option<CanisterLogResponse<'static>> {
+    canistergeek_ic_rust::logger::get_canister_log(request)
 }
 
 // ═══════════════════════════════════════════════════════════════
 //  Persistence (for upgrade)
 // ═══════════════════════════════════════════════════════════════
 
-/// Save monitor data to bytes
-pub fn save_monitor_to_bytes() -> Vec<u8> {
-    with_monitor(|monitor| {
-        let data = monitor.get_data();
-        candid::encode_args((data,)).unwrap_or_default()
-    })
+/// Get monitor stable data for pre-upgrade
+pub fn pre_upgrade_monitor_data() -> canistergeek_ic_rust::monitor::PostUpgradeStableData {
+    canistergeek_ic_rust::monitor::pre_upgrade_stable_data()
 }
 
-/// Save logger data to bytes
-pub fn save_logger_to_bytes() -> Vec<u8> {
-    with_logger(|logger| {
-        let data = logger.get_data();
-        candid::encode_args((data,)).unwrap_or_default()
-    })
+/// Get logger stable data for pre-upgrade
+pub fn pre_upgrade_logger_data() -> canistergeek_ic_rust::logger::PostUpgradeStableData {
+    canistergeek_ic_rust::logger::pre_upgrade_stable_data()
 }
 
 /// Save monitoring principals to bytes
@@ -387,22 +268,22 @@ pub fn save_principals_to_bytes() -> Vec<u8> {
 //  IC CDK Exported Functions (Optional)
 // ═══════════════════════════════════════════════════════════════
 
-/// Query to get canister metrics (guarded)
-#[ic_cdk::query(guard = "is_monitoring_authorized")]
-pub fn get_canister_metrics() -> CanisterMetrics {
-    collect_metrics()
-}
-
 /// Query to get canister information (guarded)
 #[ic_cdk::query(guard = "is_monitoring_authorized")]
-pub fn get_canister_information(request: GetInformationRequest) -> GetInformationResponse {
+pub fn get_canistergeek_information(request: GetInformationRequest) -> GetInformationResponse<'static> {
     get_information(request)
 }
 
-/// Query to get log messages (guarded)
+/// Update to update canister information (guarded)
+#[ic_cdk::update(guard = "is_monitoring_authorized")]
+pub fn update_canistergeek_information(request: UpdateInformationRequest) {
+    canistergeek_ic_rust::update_information_with_request(request);
+}
+
+/// Query to get canister log (guarded)
 #[ic_cdk::query(guard = "is_monitoring_authorized")]
-pub fn get_canister_log(request: GetLogMessagesRequest) -> GetLogMessagesResponse<CustomLogEntry> {
-    get_log_messages(request)
+pub fn get_canister_log_query(request: CanisterLogRequest) -> Option<CanisterLogResponse<'static>> {
+    get_canister_log(request)
 }
 
 /// Update to add monitoring principal (requires controller or monitoring access)
@@ -447,15 +328,5 @@ mod tests {
         // Remove principal
         auth.remove_monitoring_principal(&test_principal).unwrap();
         assert!(!auth.is_monitoring_authorized(&test_principal));
-    }
-
-    #[test]
-    fn test_log_levels() {
-        let info = CustomLogEntry {
-            timestamp: 123456,
-            message: "Info message".to_string(),
-            level: LogLevel::Info,
-        };
-        assert_eq!(info.timestamp(), 123456);
     }
 }

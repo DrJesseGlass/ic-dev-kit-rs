@@ -25,7 +25,7 @@ thiserror = "1.0"
 async-trait = "0.1"
 
 # Telemetry
-canistergeek_ic_rust = "0.4.4"
+canistergeek_ic_rust = { version = "0.4.4", optional = true }
 
 # Storage - optional, behind feature flag
 ic-stable-structures = { version = "0.7.2", optional = true }
@@ -43,6 +43,7 @@ tokio = { version = "1.0", features = ["full", "macros", "rt"] }
 default = []
 storage = ["ic-stable-structures"]
 candle = ["candle-core", "candle-nn", "candle-transformers", "tokenizers"]
+telemetry = ["canistergeek_ic_rust"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]

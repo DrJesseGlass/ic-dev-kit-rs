@@ -39,5 +39,3 @@ pub mod prelude {
     pub use crate::model_server::{ModelServer, EmptyResult, InferenceRequest, InferenceResponse, ModelInfo};
 }
 
-#[cfg(feature = "candle")]
-pub use crate::generate_model_endpoints;

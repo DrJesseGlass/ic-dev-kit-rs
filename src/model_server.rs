@@ -54,7 +54,7 @@ impl<M: AutoregressiveModel> ModelServer<M> {
         let model = model.as_mut().ok_or("Model not initialized")?;
         let tokenizer = tokenizer.as_ref().ok_or("Tokenizer not initialized")?;
 
-        generate_autoregressive(model, prompt, tokenizer.as_ref(), config)
+        generate_autoregressive(model, prompt, &**tokenizer, config)
     }
 
     pub fn reset(&self) -> Result<(), String> {

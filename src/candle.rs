@@ -62,7 +62,7 @@ pub trait AutoregressiveModel: CandleModel {
     fn init_generation(
         &mut self,
         prompt: String,
-        tokenizer: &TokenizerHandle,
+        tokenizer: &dyn TokenizerHandle,
         config: &GenerationConfig,
     ) -> Result<String, String>;
 
@@ -72,7 +72,7 @@ pub trait AutoregressiveModel: CandleModel {
     /// * Next token as text
     fn generate_next_token(
         &mut self,
-        tokenizer: &TokenizerHandle,
+        tokenizer: &dyn TokenizerHandle,
     ) -> Result<String, String>;
 
     /// Check if generation is complete (EOS reached)
@@ -142,7 +142,7 @@ impl Default for GenerationConfig {
 pub fn generate_autoregressive<T: AutoregressiveModel>(
     model: &mut T,
     prompt: String,
-    tokenizer: &impl TokenizerHandle,
+    tokenizer: &dyn TokenizerHandle,
     config: &GenerationConfig,
 ) -> Result<GenerationResponse, String> {
     let start_instructions = ic_cdk::api::performance_counter(0);
@@ -346,11 +346,12 @@ pub mod gguf {
 
         /// Find EOS token from common names
         pub fn find_eos_token(tokenizer: &Tokenizer) -> u32 {
-            tokenizer.get_vocab(true)
-                .get("<|endoftext|>")
-                .or_else(|| tokenizer.get_vocab(true).get("<|im_end|>"))
-                .or_else(|| tokenizer.get_vocab(true).get("</s>"))
-                .or_else(|| tokenizer.get_vocab(true).get("<eos>"))
+            let vocab = tokenizer.get_vocab(true);
+
+            vocab.get("<|endoftext|>")
+                .or_else(|| vocab.get("<|im_end|>"))
+                .or_else(|| vocab.get("</s>"))
+                .or_else(|| vocab.get("<eos>"))
                 .copied()
                 .unwrap_or(0)
         }

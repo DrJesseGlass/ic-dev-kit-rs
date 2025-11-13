@@ -1,4 +1,6 @@
-//! Generic model server with automatic IC endpoint generation
+//! Generic model server
+
+#![cfg(feature = "candle")]
 
 use std::cell::RefCell;
 use candid::CandidType;

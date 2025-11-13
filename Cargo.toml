@@ -10,10 +10,9 @@ keywords = ["internet-computer", "ic", "dfinity", "canister", "blockchain"]
 categories = ["web-programming", "api-bindings"]
 
 [dependencies]
-# IC dependencies
+# IC dependencies (keep working versions)
 ic-cdk = "0.18.7"
 candid = "0.10.20"
-canistergeek_ic_rust = "0.4.4"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -25,8 +24,25 @@ thiserror = "1.0"
 # Async support
 async-trait = "0.1"
 
+# Telemetry
+canistergeek_ic_rust = "0.4.4"
+
+# Storage - optional, behind feature flag
+ic-stable-structures = { version = "0.7.2", optional = true }
+
+# Candle - optional, behind feature flag
+candle-core = { git = "https://github.com/huggingface/candle", tag = "0.9.2-alpha.1", default-features = false, optional = true }
+candle-nn = { git = "https://github.com/huggingface/candle", tag = "0.9.2-alpha.1", default-features = false, optional = true }
+candle-transformers = { git = "https://github.com/huggingface/candle", tag = "0.9.2-alpha.1", default-features = false, optional = true }
+tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"], optional = true }
+
 [dev-dependencies]
 tokio = { version = "1.0", features = ["full", "macros", "rt"] }
+
+[features]
+default = []
+storage = ["ic-stable-structures"]
+candle = ["candle-core", "candle-nn", "candle-transformers", "tokenizers"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]

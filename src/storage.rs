@@ -1,4 +1,7 @@
-// Enhanced storage module with CandidType support
+//! Storage module with CandidType support
+
+#![cfg(feature = "storage")]
+
 use candid::{CandidType, Decode, Encode};
 use ic_stable_structures::StableBTreeMap;
 use std::cell::RefCell;

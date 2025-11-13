@@ -11,9 +11,9 @@ categories = ["web-programming", "api-bindings"]
 
 [dependencies]
 # IC dependencies
-ic-cdk = "0.16"
-candid = "0.10"
-canistergeek_ic_rust = "0.1"
+ic-cdk = "0.18.7"
+candid = "0.10.20"
+canistergeek_ic_rust = "0.4.4"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

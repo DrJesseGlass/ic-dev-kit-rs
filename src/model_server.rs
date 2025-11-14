@@ -1,11 +1,15 @@
 //! Generic model server
+//!
+//! This module requires both 'text-generation' and 'storage' features to be enabled.
+//! The ModelServer uses text generation for LLM inference and storage to load model weights.
 
-#![cfg(feature = "candle")]
+#![cfg(all(feature = "text-generation", feature = "storage"))]
 
 use std::cell::RefCell;
 use candid::CandidType;
 use serde::Deserialize;
 use crate::candle::*;
+use crate::text_generation::*;
 use crate::storage::StorageRegistry;
 
 pub struct ModelServer<M: AutoregressiveModel> {
@@ -54,7 +58,7 @@ impl<M: AutoregressiveModel> ModelServer<M> {
         let model = model.as_mut().ok_or("Model not initialized")?;
         let tokenizer = tokenizer.as_ref().ok_or("Tokenizer not initialized")?;
 
-        generate_autoregressive(model, prompt, &**tokenizer, config)
+        generate_autoregressive(model, prompt, tokenizer.as_ref(), config)
     }
 
     pub fn reset(&self) -> Result<(), String> {

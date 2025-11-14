@@ -42,7 +42,8 @@ tokio = { version = "1.0", features = ["full", "macros", "rt"] }
 [features]
 default = []
 storage = ["ic-stable-structures"]
-candle = ["candle-core", "candle-nn", "candle-transformers", "tokenizers"]
+candle = ["storage", "candle-core", "candle-nn"]
+text-generation = ["candle", "candle-transformers", "tokenizers"]
 telemetry = ["canistergeek_ic_rust"]
 
 [lib]

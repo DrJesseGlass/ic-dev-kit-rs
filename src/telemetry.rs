@@ -1,4 +1,7 @@
 // Telemetry module for Internet Computer canisters with Canistergeek integration
+
+#![cfg(feature = "telemetry")]
+
 use candid::Principal;
 use canistergeek_ic_rust::api_type::*;
 use ic_cdk;
@@ -198,7 +201,17 @@ pub fn list_monitoring_principals() -> Vec<Principal> {
 /// Update canister information (call this in update methods)
 /// This is the new API method that replaces collect_metrics
 pub fn update_information() {
-    canistergeek_ic_rust::update_information();
+    use canistergeek_ic_rust::api_type::{UpdateInformationRequest, CollectMetricsRequestType};
+
+    let request = UpdateInformationRequest {
+        metrics: Some(CollectMetricsRequestType::normal),
+    };
+    canistergeek_ic_rust::update_information(request);
+}
+
+/// Alternative: use the shortcut function
+pub fn collect_metrics() {
+    canistergeek_ic_rust::monitor::collect_metrics();
 }
 
 /// Get canister information
@@ -241,22 +254,51 @@ pub fn log_debug(message: impl Into<String>) {
 
 /// Get canister log
 pub fn get_canister_log(request: CanisterLogRequest) -> Option<CanisterLogResponse<'static>> {
-    canistergeek_ic_rust::logger::get_canister_log(request)
+    canistergeek_ic_rust::logger::get_canister_log(Some(request))
 }
 
 // ═══════════════════════════════════════════════════════════════
 //  Persistence (for upgrade)
 // ═══════════════════════════════════════════════════════════════
 
-/// Get monitor stable data for pre-upgrade
-pub fn pre_upgrade_monitor_data() -> canistergeek_ic_rust::monitor::PostUpgradeStableData {
-    canistergeek_ic_rust::monitor::pre_upgrade_stable_data()
-}
-
-/// Get logger stable data for pre-upgrade
-pub fn pre_upgrade_logger_data() -> canistergeek_ic_rust::logger::PostUpgradeStableData {
-    canistergeek_ic_rust::logger::pre_upgrade_stable_data()
-}
+/// Save monitoring principals to bytes for stable storage
+///
+/// For pre_upgrade, use canistergeek_ic_rust functions directly since they
+/// return non-cloneable references:
+///
+/// # Example
+/// ```rust,ignore
+/// #[ic_cdk::pre_upgrade]
+/// fn pre_upgrade() {
+///     let monitor = canistergeek_ic_rust::monitor::pre_upgrade_stable_data();
+///     let logger = canistergeek_ic_rust::logger::pre_upgrade_stable_data();
+///     let principals = ic_dev_kit_rs::telemetry::save_principals_to_bytes();
+///
+///     ic_cdk::storage::stable_save((monitor, logger, principals))
+///         .expect("Failed to save telemetry");
+/// }
+///
+/// #[ic_cdk::post_upgrade]
+/// fn post_upgrade() {
+///     use canistergeek_ic_rust::{monitor, logger};
+///
+///     let (monitor_data, logger_data, principals_bytes): (
+///         monitor::PostUpgradeStableData,
+///         logger::PostUpgradeStableData,
+///         Vec<u8>,
+///     ) = ic_cdk::storage::stable_restore().expect("Failed to restore");
+///
+///     let principals = candid::decode_args(&principals_bytes)
+///         .ok()
+///         .map(|(p,): (Vec<Principal>,)| p);
+///
+///     ic_dev_kit_rs::telemetry::init_from_saved(
+///         Some(monitor_data),
+///         Some(logger_data),
+///         principals,
+///     );
+/// }
+/// ```
 
 /// Save monitoring principals to bytes
 pub fn save_principals_to_bytes() -> Vec<u8> {
@@ -277,7 +319,7 @@ pub fn get_canistergeek_information(request: GetInformationRequest) -> GetInform
 /// Update to update canister information (guarded)
 #[ic_cdk::update(guard = "is_monitoring_authorized")]
 pub fn update_canistergeek_information(request: UpdateInformationRequest) {
-    canistergeek_ic_rust::update_information_with_request(request);
+    canistergeek_ic_rust::update_information(request);
 }
 
 /// Query to get canister log (guarded)

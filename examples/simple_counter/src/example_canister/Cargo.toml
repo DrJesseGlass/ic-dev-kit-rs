@@ -1,0 +1,23 @@
+[package]
+name = "example_canister"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+candid = "0.10"
+ic-cdk = "0.18.7"
+ic-stable-structures = "0.7.2"
+serde = { version = "1.0", features = ["derive"] }
+
+# Your ic-dev-kit-rs with all features
+ic-dev-kit-rs = { path = "../../../../../ic-dev-kit-rs", features = ["telemetry", "storage"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

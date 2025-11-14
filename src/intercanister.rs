@@ -1,45 +1,11 @@
-// Intercanister call wrapper with timeout and logging
+// Intercanister call wrapper for ic-cdk 0.19
 //
-// This module provides a single abstraction point for all intercanister calls,
-// making it easy to update call patterns across your entire codebase.
-//
-// ## Benefits
-//
-// - **DRY**: Update timeout logic in one place
-// - **Logging**: Automatic logging of all intercanister calls
-// - **Error handling**: Consistent error formatting
-// - **Future-proof**: Easy to add retries, metrics, etc.
-//
-// ## Usage
-//
-// ```rust
-// use ic_dev_kit_rs::intercanister;
-// use candid::Principal;
-//
-// #[derive(CandidType)]
-// struct MyRequest {
-//     data: String,
-// }
-//
-// #[derive(CandidType, Deserialize)]
-// struct MyResponse {
-//     result: u64,
-// }
-//
-// async fn call_other_canister() -> Result<MyResponse, String> {
-//     let canister_id = Principal::from_text("...").unwrap();
-//
-//     let request = MyRequest {
-//         data: "hello".to_string(),
-//     };
-//
-//     // Simple call
-//     intercanister::call(canister_id, "my_method", request).await
-// }
-// ```
+// Note: ic-cdk 0.19 is in a transitional state where the types have moved
+// to ic_cdk::call but the functions are still in ic_cdk::api::call (deprecated).
+// The replacement API mentioned in warnings doesn't actually exist yet.
+// Using #[allow(deprecated)] is the correct approach until the API is fully updated.
 
 use candid::{CandidType, Principal};
-use ic_cdk;
 use serde::de::DeserializeOwned;
 
 // ═══════════════════════════════════════════════════════════════
@@ -47,20 +13,7 @@ use serde::de::DeserializeOwned;
 // ═══════════════════════════════════════════════════════════════
 
 /// Make an intercanister call with automatic logging
-///
-/// This is the primary function for intercanister calls. It:
-/// - Logs the call before and after execution
-/// - Uses proper error handling
-/// - Returns a Result for easy error propagation
-///
-/// ## Example
-/// ```rust,ignore
-/// let response: MyResponse = intercanister::call(
-///     canister_id,
-///     "my_method",
-///     MyRequest { data: "test".to_string() }
-/// ).await?;
-/// ```
+#[allow(deprecated)]
 pub async fn call<T, R>(
     canister_id: Principal,
     method: &str,
@@ -72,7 +25,7 @@ where
 {
     log_call_start(canister_id, method);
 
-    let result: Result<(R,), _> = ic_cdk::call(canister_id, method, (args,)).await;
+    let result: Result<(R,), _> = ic_cdk::api::call::call(canister_id, method, (args,)).await;
 
     match &result {
         Ok(_) => log_call_success(canister_id, method),
@@ -85,8 +38,7 @@ where
 }
 
 /// Make an intercanister call with payment (cycles)
-///
-/// Use this when you need to send cycles with the call.
+#[allow(deprecated)]
 pub async fn call_with_payment<T, R>(
     canister_id: Principal,
     method: &str,
@@ -112,11 +64,9 @@ where
         .map_err(|e| format_call_error(canister_id, method, e))
 }
 
-/// Make an intercanister call without waiting for response (fire and forget)
-///
-/// Note: This still returns a Result, but you don't get the response data.
-/// Useful for notifications or when you don't care about the result.
-pub async fn call_one_way<T>(
+/// Make an intercanister call without waiting for response
+#[allow(deprecated)]
+pub fn call_one_way<T>(
     canister_id: Principal,
     method: &str,
     args: T,
@@ -126,7 +76,7 @@ where
 {
     log_call_start(canister_id, method);
 
-    let result: Result<(), _> = ic_cdk::notify(canister_id, method, (args,));
+    let result: Result<(), _> = ic_cdk::api::call::notify(canister_id, method, (args,));
 
     match &result {
         Ok(_) => {
@@ -160,6 +110,7 @@ fn log_call_success(canister_id: Principal, method: &str) {
     log_message(&format!("✓ Call {}.{} succeeded", canister_id, method));
 }
 
+#[allow(deprecated)]
 fn log_call_error(canister_id: Principal, method: &str, error: &(ic_cdk::api::call::RejectionCode, String)) {
     log_message(&format!(
         "✗ Call {}.{} failed: {:?} - {}",
@@ -167,6 +118,7 @@ fn log_call_error(canister_id: Principal, method: &str, error: &(ic_cdk::api::ca
     ));
 }
 
+#[allow(deprecated)]
 fn format_call_error(
     canister_id: Principal,
     method: &str,
@@ -179,22 +131,14 @@ fn format_call_error(
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  Logging Backend (can be customized)
+//  Logging Backend
 // ═══════════════════════════════════════════════════════════════
 
-/// Log a message
-///
-/// By default, this uses ic_cdk::println!. If you want to integrate with
-/// the telemetry module or another logging system, modify this function.
 fn log_message(msg: &str) {
-    // Option 1: Simple println (default)
     ic_cdk::println!("{}", msg);
-
-    // Option 2: Integrate with telemetry module (uncomment if using telemetry)
-    // crate::telemetry::log_info(msg);
 }
 
-/// Convenience function to call the method that takes no arguments
+/// Convenience function to call a method that takes no arguments
 pub async fn call_no_args<R>(
     canister_id: Principal,
     method: &str,
@@ -213,6 +157,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(deprecated)]
     fn test_error_formatting() {
         let canister_id = Principal::anonymous();
         let error = (ic_cdk::api::call::RejectionCode::CanisterError, "Test error".to_string());

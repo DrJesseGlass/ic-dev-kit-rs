@@ -1,6 +1,4 @@
 // HTTP handling module for Internet Computer canisters
-use candid::Principal;
-use ic_cdk;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
@@ -263,44 +261,53 @@ where
 //  Path Utilities
 // ═══════════════════════════════════════════════════════════════
 
-/// Extract path from URL (removes query parameters)
+/// Extract the path from a URL (removes query string)
 pub fn extract_path(url: &str) -> &str {
-    url.split('?').next().unwrap_or("")
+    url.split('?').next().unwrap_or(url)
 }
 
-/// Extract query parameters from URL
+/// Extract query parameters from a URL
 pub fn extract_query_params(url: &str) -> HashMap<String, String> {
     let mut params = HashMap::new();
+
     if let Some(query) = url.split('?').nth(1) {
-        for pair in query.split('&') {
-            let mut parts = pair.splitn(2, '=');
-            if let (Some(key), Some(value)) = (parts.next(), parts.next()) {
+        for param in query.split('&') {
+            if let Some((key, value)) = param.split_once('=') {
                 params.insert(key.to_string(), value.to_string());
             }
         }
     }
+
     params
 }
 
-/// Check if a path matches a pattern with wildcards
+/// Check if a path matches a pattern (with wildcard support)
 pub fn matches_pattern(path: &str, pattern: &str) -> bool {
-    if pattern.contains('*') {
-        let parts: Vec<&str> = pattern.split('*').collect();
-        if parts.len() == 2 {
-            path.starts_with(parts[0]) && path.ends_with(parts[1])
-        } else {
-            path == pattern
-        }
-    } else {
-        path == pattern
+    let path_parts: Vec<&str> = path.split('/').collect();
+    let pattern_parts: Vec<&str> = pattern.split('/').collect();
+
+    if path_parts.len() != pattern_parts.len() {
+        return false;
     }
+
+    for (path_part, pattern_part) in path_parts.iter().zip(pattern_parts.iter()) {
+        if pattern_part == &"*" {
+            continue;
+        }
+        if pattern_part.starts_with(':') {
+            continue;
+        }
+        if path_part != pattern_part {
+            return false;
+        }
+    }
+
+    true
 }
 
-/// Extract path parameters from a parameterized path
-/// Example: extract_params("/api/users/123", "/api/users/:id") -> {"id": "123"}
+/// Extract path parameters from a pattern match
 pub fn extract_params(path: &str, pattern: &str) -> HashMap<String, String> {
     let mut params = HashMap::new();
-
     let path_parts: Vec<&str> = path.split('/').collect();
     let pattern_parts: Vec<&str> = pattern.split('/').collect();
 

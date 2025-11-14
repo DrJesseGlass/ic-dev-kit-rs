@@ -82,11 +82,11 @@ where
                 crate::telemetry::log_info(&format!("Loaded data from stable storage: {}", key));
                 Some(data)
             }
-            Err(e) => {
+            Err(_e) => {
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::log_error(&format!(
                     "Failed to deserialize data for key {}: {:?}",
-                    key, e
+                    key, _e
                 ));
                 None
             }
@@ -100,7 +100,9 @@ pub fn save_bytes<R: StorageRegistry>(
     key: &str,
     bytes: Vec<u8>,
 ) {
+    #[cfg(feature = "telemetry")]
     let size = bytes.len();
+
     registry.borrow_mut().insert(key.to_string(), bytes);
 
     #[cfg(feature = "telemetry")]

@@ -74,7 +74,7 @@ impl MonitoringAuth {
     }
 
     pub fn check_access(&self) -> TelemetryResult<()> {
-        let caller = ic_cdk::api::caller();
+        let caller = ic_cdk::api::msg_caller();
 
         if self.is_controller(&caller) || self.is_monitoring_authorized(&caller) {
             Ok(())

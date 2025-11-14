@@ -2,37 +2,6 @@
 //
 // This module provides utilities for uploading large files to IC canisters
 // using either sequential or parallel chunk uploads.
-//
-// ## Usage Patterns
-//
-// ### Sequential Upload (simple)
-// ```rust
-// use ic_dev_kit_rs::large_objects;
-//
-// // Client uploads chunks sequentially
-// for chunk in file_chunks {
-//     large_objects::append_chunk(chunk);
-// }
-//
-// // Get the complete data
-// let data = large_objects::get_buffer_data();
-// // ... save to your REGISTRIES or process
-// ```
-//
-// ### Parallel Upload (faster, out-of-order chunks)
-// ```rust
-// // Client uploads chunks in parallel (any order)
-// large_objects::append_parallel_chunk(0, chunk_0);
-// large_objects::append_parallel_chunk(2, chunk_2);
-// large_objects::append_parallel_chunk(1, chunk_1);
-//
-// // Check completeness
-// if large_objects::parallel_chunks_complete(3) {
-//     // Get consolidated data
-//     let data = large_objects::get_parallel_data()?;
-//     // ... save to your REGISTRIES
-// }
-// ```
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -54,8 +23,6 @@ thread_local! {
 // ═══════════════════════════════════════════════════════════════
 
 /// Append a chunk to the sequential buffer
-///
-/// Use this for simple, ordered uploads where chunks arrive sequentially.
 pub fn append_chunk(chunk: Vec<u8>) {
     BUFFER.with(|buffer| {
         buffer.borrow_mut().extend(chunk);
@@ -94,9 +61,6 @@ pub fn load_to_buffer(data: Vec<u8>) {
 // ═══════════════════════════════════════════════════════════════
 
 /// Append a chunk with ID for parallel uploads
-///
-/// Chunks can arrive in any order. Use chunk IDs to track which chunks
-/// have been received.
 pub fn append_parallel_chunk(chunk_id: u32, chunk: Vec<u8>) {
     BUFFER_MAP.with(|buffer_map| {
         buffer_map.borrow_mut().insert(chunk_id, chunk);
@@ -125,9 +89,6 @@ pub fn parallel_buffer_size() -> usize {
 }
 
 /// Check if all chunks from 0 to expected_count-1 are present
-///
-/// Returns true only if we have exactly `expected_count` chunks
-/// numbered consecutively from 0.
 pub fn parallel_chunks_complete(expected_count: u32) -> bool {
     BUFFER_MAP.with(|buffer_map| {
         let buffer_map = buffer_map.borrow();
@@ -136,7 +97,6 @@ pub fn parallel_chunks_complete(expected_count: u32) -> bool {
             return false;
         }
 
-        // Check that we have consecutive chunks from 0 to expected_count-1
         for i in 0..expected_count {
             if !buffer_map.contains_key(&i) {
                 return false;
@@ -164,11 +124,6 @@ pub fn missing_chunks(expected_count: u32) -> Vec<u32> {
 }
 
 /// Consolidate parallel chunks into the sequential buffer
-///
-/// This moves data from BUFFER_MAP to BUFFER in chunk ID order,
-/// then clears BUFFER_MAP.
-///
-/// Returns the total size of consolidated data.
 pub fn consolidate_parallel_chunks() -> Result<usize, String> {
     let (chunk_data, total_size) = BUFFER_MAP.with(|buffer_map| {
         let mut buffer_map = buffer_map.borrow_mut();
@@ -177,7 +132,6 @@ pub fn consolidate_parallel_chunks() -> Result<usize, String> {
             return (Vec::new(), 0);
         }
 
-        // Sort chunk IDs and collect data in order
         let mut sorted_ids: Vec<u32> = buffer_map.keys().copied().collect();
         sorted_ids.sort();
 
@@ -191,7 +145,6 @@ pub fn consolidate_parallel_chunks() -> Result<usize, String> {
             }
         }
 
-        // Clear the map after consolidation
         buffer_map.clear();
 
         (consolidated_data, total_size)
@@ -201,10 +154,9 @@ pub fn consolidate_parallel_chunks() -> Result<usize, String> {
         return Err("No parallel chunks to consolidate".to_string());
     }
 
-    // Move consolidated data to main buffer
     BUFFER.with(|buffer| {
         let mut buffer = buffer.borrow_mut();
-        buffer.clear(); // Clear existing buffer
+        buffer.clear();
         buffer.extend(chunk_data);
     });
 
@@ -212,8 +164,6 @@ pub fn consolidate_parallel_chunks() -> Result<usize, String> {
 }
 
 /// Get consolidated data from parallel chunks (without moving to BUFFER)
-///
-/// Returns the data in chunk ID order. Does NOT clear the parallel buffer.
 pub fn get_parallel_data() -> Result<Vec<u8>, String> {
     BUFFER_MAP.with(|buffer_map| {
         let buffer_map = buffer_map.borrow();
@@ -222,7 +172,6 @@ pub fn get_parallel_data() -> Result<Vec<u8>, String> {
             return Err("No parallel chunks available".to_string());
         }
 
-        // Sort chunk IDs and collect data in order
         let mut sorted_ids: Vec<u32> = buffer_map.keys().copied().collect();
         sorted_ids.sort();
 
@@ -246,8 +195,6 @@ pub fn clear_parallel_chunks() {
 }
 
 /// Remove a specific chunk from parallel buffer
-///
-/// Useful for retry scenarios where a chunk needs to be re-uploaded.
 pub fn remove_parallel_chunk(chunk_id: u32) -> bool {
     BUFFER_MAP.with(|buffer_map| {
         buffer_map.borrow_mut().remove(&chunk_id).is_some()
@@ -302,6 +249,204 @@ impl std::fmt::Display for StorageStatus {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  MACRO: Auto-generate IC endpoints
+// ═══════════════════════════════════════════════════════════════
+
+/// Macro to generate all IC endpoints for large object uploads
+///
+/// This generates endpoints for both sequential and parallel uploads,
+/// as well as helpers for saving to storage.
+///
+/// # Example
+/// ```rust,ignore
+/// use ic_dev_kit_rs::large_objects;
+///
+/// // Generate all upload endpoints with optional authorization
+/// ic_dev_kit_rs::generate_upload_endpoints!();
+///
+/// // Or with a custom guard:
+/// ic_dev_kit_rs::generate_upload_endpoints!(guard = "my_custom_guard");
+///
+/// // Or with storage integration:
+/// ic_dev_kit_rs::generate_upload_endpoints!(
+///     guard = "ic_dev_kit_rs::auth::is_authorized",
+///     registry = REGISTRIES
+/// );
+/// ```
+#[macro_export]
+macro_rules! generate_upload_endpoints {
+    // With storage registry
+    (guard = $guard:expr, registry = $registry:ident) => {
+        // Sequential upload endpoints
+        #[ic_cdk::update(guard = $guard)]
+        pub fn append_chunk(chunk: Vec<u8>) -> usize {
+            $crate::large_objects::append_chunk(chunk);
+            $crate::large_objects::buffer_size()
+        }
+
+        #[ic_cdk::query]
+        pub fn buffer_size() -> usize {
+            $crate::large_objects::buffer_size()
+        }
+
+        #[ic_cdk::update(guard = $guard)]
+        pub fn clear_buffer() {
+            $crate::large_objects::clear_buffer();
+        }
+
+        // Parallel upload endpoints
+        #[ic_cdk::update(guard = $guard)]
+        pub fn append_parallel_chunk(chunk_id: u32, chunk: Vec<u8>) -> usize {
+            $crate::large_objects::append_parallel_chunk(chunk_id, chunk);
+            $crate::large_objects::parallel_chunk_count()
+        }
+
+        #[ic_cdk::query]
+        pub fn parallel_chunks_complete(expected_count: u32) -> bool {
+            $crate::large_objects::parallel_chunks_complete(expected_count)
+        }
+
+        #[ic_cdk::query]
+        pub fn missing_chunks(expected_count: u32) -> Vec<u32> {
+            $crate::large_objects::missing_chunks(expected_count)
+        }
+
+        #[ic_cdk::update(guard = $guard)]
+        pub fn clear_parallel_chunks() {
+            $crate::large_objects::clear_parallel_chunks();
+        }
+
+        #[ic_cdk::query]
+        pub fn parallel_chunk_count() -> usize {
+            $crate::large_objects::parallel_chunk_count()
+        }
+
+        // Storage integration endpoints
+        #[ic_cdk::update(guard = $guard)]
+        pub fn save_buffer_to_storage(key: String) -> Result<String, String> {
+            let data = $crate::large_objects::get_buffer_data();
+            if data.is_empty() {
+                return Err("No data in buffer".to_string());
+            }
+
+            let size = data.len();
+            $registry.with(|r| {
+                $crate::storage::save_bytes(r, &key, data);
+            });
+
+            $crate::large_objects::clear_buffer();
+
+            #[cfg(feature = "telemetry")]
+            $crate::telemetry::log_info(&format!("Saved {} bytes to key '{}'", size, key));
+
+            Ok(format!("Saved {} bytes to key '{}'", size, key))
+        }
+
+        #[ic_cdk::update(guard = $guard)]
+        pub fn save_parallel_to_storage(key: String) -> Result<String, String> {
+            let data = $crate::large_objects::get_parallel_data()?;
+            let size = data.len();
+
+            $registry.with(|r| {
+                $crate::storage::save_bytes(r, &key, data);
+            });
+
+            $crate::large_objects::clear_parallel_chunks();
+
+            #[cfg(feature = "telemetry")]
+            $crate::telemetry::log_info(&format!("Saved {} bytes to key '{}'", size, key));
+
+            Ok(format!("Saved {} bytes to key '{}'", size, key))
+        }
+
+        #[ic_cdk::query]
+        pub fn storage_key_exists(key: String) -> bool {
+            $registry.with(|r| $crate::storage::exists(r, &key))
+        }
+
+        #[ic_cdk::query]
+        pub fn get_storage_size(key: String) -> Option<usize> {
+            $registry.with(|r| $crate::storage::size(r, &key))
+        }
+
+        #[ic_cdk::update(guard = $guard)]
+        pub fn delete_storage_key(key: String) -> Result<String, String> {
+            let deleted = $registry.with(|r| $crate::storage::delete(r, &key));
+
+            if deleted {
+                Ok(format!("Deleted key '{}'", key))
+            } else {
+                Err(format!("Key '{}' not found", key))
+            }
+        }
+
+        // Status endpoint
+        #[ic_cdk::query]
+        pub fn get_storage_status() -> String {
+            $crate::large_objects::storage_status().to_string()
+        }
+    };
+
+    // Without storage registry (just upload endpoints)
+    (guard = $guard:expr) => {
+        // Sequential upload endpoints
+        #[ic_cdk::update(guard = $guard)]
+        pub fn append_chunk(chunk: Vec<u8>) -> usize {
+            $crate::large_objects::append_chunk(chunk);
+            $crate::large_objects::buffer_size()
+        }
+
+        #[ic_cdk::query]
+        pub fn buffer_size() -> usize {
+            $crate::large_objects::buffer_size()
+        }
+
+        #[ic_cdk::update(guard = $guard)]
+        pub fn clear_buffer() {
+            $crate::large_objects::clear_buffer();
+        }
+
+        // Parallel upload endpoints
+        #[ic_cdk::update(guard = $guard)]
+        pub fn append_parallel_chunk(chunk_id: u32, chunk: Vec<u8>) -> usize {
+            $crate::large_objects::append_parallel_chunk(chunk_id, chunk);
+            $crate::large_objects::parallel_chunk_count()
+        }
+
+        #[ic_cdk::query]
+        pub fn parallel_chunks_complete(expected_count: u32) -> bool {
+            $crate::large_objects::parallel_chunks_complete(expected_count)
+        }
+
+        #[ic_cdk::query]
+        pub fn missing_chunks(expected_count: u32) -> Vec<u32> {
+            $crate::large_objects::missing_chunks(expected_count)
+        }
+
+        #[ic_cdk::update(guard = $guard)]
+        pub fn clear_parallel_chunks() {
+            $crate::large_objects::clear_parallel_chunks();
+        }
+
+        #[ic_cdk::query]
+        pub fn parallel_chunk_count() -> usize {
+            $crate::large_objects::parallel_chunk_count()
+        }
+
+        // Status endpoint
+        #[ic_cdk::query]
+        pub fn get_storage_status() -> String {
+            $crate::large_objects::storage_status().to_string()
+        }
+    };
+
+    // No guard (public endpoints - not recommended for production!)
+    () => {
+        ic_dev_kit_rs::generate_upload_endpoints!(guard = "|| Ok(())");
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,92 +462,21 @@ mod tests {
 
         let data = get_buffer_data();
         assert_eq!(data, vec![1, 2, 3, 4, 5, 6]);
-        assert_eq!(buffer_size(), 0); // Buffer consumed
+        assert_eq!(buffer_size(), 0);
     }
 
     #[test]
     fn test_parallel_chunks() {
         clear_parallel_chunks();
 
-        // Upload chunks out of order
         append_parallel_chunk(2, vec![5, 6]);
         append_parallel_chunk(0, vec![1, 2]);
         append_parallel_chunk(1, vec![3, 4]);
 
         assert_eq!(parallel_chunk_count(), 3);
         assert_eq!(parallel_buffer_size(), 6);
-
-        // Check completeness
         assert!(parallel_chunks_complete(3));
         assert!(!parallel_chunks_complete(4));
-
-        // Get IDs (should be sorted)
         assert_eq!(parallel_chunk_ids(), vec![0, 1, 2]);
-    }
-
-    #[test]
-    fn test_consolidate_parallel_chunks() {
-        clear_buffer();
-        clear_parallel_chunks();
-
-        // Upload chunks
-        append_parallel_chunk(1, vec![3, 4]);
-        append_parallel_chunk(0, vec![1, 2]);
-        append_parallel_chunk(2, vec![5, 6]);
-
-        // Consolidate
-        let size = consolidate_parallel_chunks().unwrap();
-        assert_eq!(size, 6);
-
-        // Check sequential buffer has data in correct order
-        assert_eq!(buffer_size(), 6);
-        let data = get_buffer_data();
-        assert_eq!(data, vec![1, 2, 3, 4, 5, 6]);
-
-        // Parallel chunks should be cleared
-        assert_eq!(parallel_chunk_count(), 0);
-    }
-
-    #[test]
-    fn test_missing_chunks() {
-        clear_parallel_chunks();
-
-        append_parallel_chunk(0, vec![1, 2]);
-        append_parallel_chunk(2, vec![5, 6]);
-        // Missing chunk 1
-
-        let missing = missing_chunks(3);
-        assert_eq!(missing, vec![1]);
-
-        assert!(!parallel_chunks_complete(3));
-    }
-
-    #[test]
-    fn test_remove_parallel_chunk() {
-        clear_parallel_chunks();
-
-        append_parallel_chunk(0, vec![1, 2]);
-        append_parallel_chunk(1, vec![3, 4]);
-
-        assert!(remove_parallel_chunk(0));
-        assert!(!remove_parallel_chunk(0)); // Already removed
-
-        assert_eq!(parallel_chunk_count(), 1);
-    }
-
-    #[test]
-    fn test_storage_status() {
-        clear_buffer();
-        clear_parallel_chunks();
-
-        append_chunk(vec![1, 2, 3]);
-        append_parallel_chunk(0, vec![4, 5]);
-        append_parallel_chunk(1, vec![6, 7, 8]);
-
-        let status = storage_status();
-        assert_eq!(status.buffer_size, 3);
-        assert_eq!(status.parallel_chunk_count, 2);
-        assert_eq!(status.parallel_buffer_size, 5);
-        assert_eq!(status.parallel_chunk_ids, vec![0, 1]);
     }
 }

@@ -7,7 +7,7 @@
 
 use candid::CandidType;
 use serde::Deserialize;
-use crate::candle::{CandleModel, ModelMetadata};
+use crate::candle::CandleModel;
 
 // ═══════════════════════════════════════════════════════════════
 //  Autoregressive Model Traits (for LLMs)

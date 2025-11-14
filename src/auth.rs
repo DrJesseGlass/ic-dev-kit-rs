@@ -94,8 +94,8 @@ impl Auth {
 
     /// Get the current caller principal
     pub fn get_current_principal(&self) -> AuthResult<Principal> {
-        let caller = ic_cdk::api::caller();
-        if caller == ic_cdk::api::id() {
+        let caller = ic_cdk::api::msg_caller();
+        if caller == ic_cdk::api::canister_self() {
             return Err(AuthError::Unauthorized);
         }
         Ok(caller)
@@ -164,7 +164,7 @@ pub fn init() {
 
 /// Initialize auth system with the deployer as initial authorized principal
 pub fn init_with_caller() {
-    let caller = ic_cdk::api::caller();
+    let caller = ic_cdk::api::msg_caller();
     let storage = AuthStorage::with_initial_principal(caller);
     let auth = Auth::new(storage);
     AUTH.with(|a| *a.borrow_mut() = Some(auth));
@@ -194,12 +194,12 @@ pub fn init_from_saved(saved_bytes: Option<Vec<u8>>) {
             }
             Err(e) => {
                 ic_cdk::println!("Failed to decode saved principals: {:?}, starting fresh", e);
-                vec![ic_cdk::api::caller()]
+                vec![ic_cdk::api::msg_caller()]
             }
         }
     } else {
         ic_cdk::println!("No saved principals found, starting fresh");
-        vec![ic_cdk::api::caller()]
+        vec![ic_cdk::api::msg_caller()]
     };
 
     init_with_principals(principals);

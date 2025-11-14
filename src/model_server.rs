@@ -137,14 +137,21 @@ macro_rules! generate_model_endpoints {
 
         #[ic_cdk::update(guard = "ic_dev_kit_rs::auth::is_authorized")]
         pub fn setup_model() -> EmptyResult {
-            $crate::telemetry::track_metrics();
+            #[cfg(feature = "telemetry")]
+            $crate::telemetry::collect_metrics();
 
-            match $server.with(|s| s.setup_from_storage(&$registry, $weights_key, $tokenizer_key, $get_tokenizer)) {
+            match $server.with(|s| {
+                $registry.with(|r| {
+                    s.setup_from_storage(r, $weights_key, $tokenizer_key, $get_tokenizer)
+                })
+            }) {
                 Ok(_) => {
+                    #[cfg(feature = "telemetry")]
                     $crate::telemetry::log_info("Model loaded");
                     EmptyResult::Ok
                 }
                 Err(e) => {
+                    #[cfg(feature = "telemetry")]
                     $crate::telemetry::log_error(&format!("Load failed: {}", e));
                     EmptyResult::Err(e)
                 }
@@ -153,7 +160,8 @@ macro_rules! generate_model_endpoints {
 
         #[ic_cdk::update]
         pub fn generate(request: InferenceRequest) -> InferenceResponse {
-            $crate::telemetry::track_metrics();
+            #[cfg(feature = "telemetry")]
+            $crate::telemetry::collect_metrics();
 
             let config = request.config.unwrap_or_default();
 
@@ -161,6 +169,7 @@ macro_rules! generate_model_endpoints {
                 match s.generate(request.prompt, &config) {
                     Ok(response) => response.into(),
                     Err(e) => {
+                        #[cfg(feature = "telemetry")]
                         $crate::telemetry::log_error(&format!("Generation failed: {}", e));
                         InferenceResponse {
                             generated_text: String::new(),

@@ -25,7 +25,9 @@ thiserror = "1.0"
 async-trait = "0.1"
 
 # Telemetry
+# doesn't support 0.4.4 ic-cdk v19 yet which has different inter canister calls
 canistergeek_ic_rust = { version = "0.4.4", optional = true }
+#canistergeek_ic_rust = { git = "https://github.com/DrJesseGlass/canistergeek_ic_rust", branch = "update/ic-cdk/19",  optional = true}
 
 # Storage - optional, behind feature flag
 ic-stable-structures = { version = "0.7.2", optional = true }

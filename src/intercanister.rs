@@ -20,12 +20,12 @@ pub async fn call<T, R>(
     args: T,
 ) -> Result<R, String>
 where
-    T: CandidType,
+    T: candid::utils::ArgumentEncoder,
     R: DeserializeOwned + CandidType,
 {
     log_call_start(canister_id, method);
 
-    let result: Result<(R,), _> = ic_cdk::api::call::call(canister_id, method, (args,)).await;
+    let result: Result<(R,), _> = ic_cdk::api::call::call(canister_id, method, args).await;
 
     match &result {
         Ok(_) => log_call_success(canister_id, method),
@@ -46,13 +46,13 @@ pub async fn call_with_payment<T, R>(
     cycles: u128,
 ) -> Result<R, String>
 where
-    T: CandidType,
+    T: candid::utils::ArgumentEncoder,
     R: DeserializeOwned + CandidType,
 {
     log_call_start_with_cycles(canister_id, method, cycles);
 
     let result: Result<(R,), _> =
-        ic_cdk::api::call::call_with_payment128(canister_id, method, (args,), cycles).await;
+        ic_cdk::api::call::call_with_payment128(canister_id, method, args, cycles).await;
 
     match &result {
         Ok(_) => log_call_success(canister_id, method),
@@ -72,11 +72,11 @@ pub fn call_one_way<T>(
     args: T,
 ) -> Result<(), String>
 where
-    T: CandidType,
+    T: candid::utils::ArgumentEncoder,
 {
     log_call_start(canister_id, method);
 
-    let result: Result<(), _> = ic_cdk::api::call::notify(canister_id, method, (args,));
+    let result: Result<(), _> = ic_cdk::api::call::notify(canister_id, method, args);
 
     match &result {
         Ok(_) => {
@@ -149,7 +149,7 @@ where
     #[derive(CandidType)]
     struct NoArgs {}
 
-    call(canister_id, method, NoArgs {}).await
+    call(canister_id, method, ()).await
 }
 
 #[cfg(test)]

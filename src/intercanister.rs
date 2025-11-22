@@ -14,11 +14,7 @@ use serde::de::DeserializeOwned;
 
 /// Make an intercanister call with automatic logging
 #[allow(deprecated)]
-pub async fn call<T, R>(
-    canister_id: Principal,
-    method: &str,
-    args: T,
-) -> Result<R, String>
+pub async fn call<T, R>(canister_id: Principal, method: &str, args: T) -> Result<R, String>
 where
     T: candid::utils::ArgumentEncoder,
     R: DeserializeOwned + CandidType,
@@ -66,11 +62,7 @@ where
 
 /// Make an intercanister call without waiting for response
 #[allow(deprecated)]
-pub fn call_one_way<T>(
-    canister_id: Principal,
-    method: &str,
-    args: T,
-) -> Result<(), String>
+pub fn call_one_way<T>(canister_id: Principal, method: &str, args: T) -> Result<(), String>
 where
     T: candid::utils::ArgumentEncoder,
 {
@@ -111,7 +103,11 @@ fn log_call_success(canister_id: Principal, method: &str) {
 }
 
 #[allow(deprecated)]
-fn log_call_error(canister_id: Principal, method: &str, error: &(ic_cdk::api::call::RejectionCode, String)) {
+fn log_call_error(
+    canister_id: Principal,
+    method: &str,
+    error: &(ic_cdk::api::call::RejectionCode, String),
+) {
     log_message(&format!(
         "✗ Call {}.{} failed: {:?} - {}",
         canister_id, method, error.0, error.1
@@ -139,16 +135,10 @@ fn log_message(msg: &str) {
 }
 
 /// Convenience function to call a method that takes no arguments
-pub async fn call_no_args<R>(
-    canister_id: Principal,
-    method: &str,
-) -> Result<R, String>
+pub async fn call_no_args<R>(canister_id: Principal, method: &str) -> Result<R, String>
 where
     R: DeserializeOwned + CandidType,
 {
-    #[derive(CandidType)]
-    struct NoArgs {}
-
     call(canister_id, method, ()).await
 }
 
@@ -160,7 +150,10 @@ mod tests {
     #[allow(deprecated)]
     fn test_error_formatting() {
         let canister_id = Principal::anonymous();
-        let error = (ic_cdk::api::call::RejectionCode::CanisterError, "Test error".to_string());
+        let error = (
+            ic_cdk::api::call::RejectionCode::CanisterError,
+            "Test error".to_string(),
+        );
 
         let formatted = format_call_error(canister_id, "test_method", error);
 

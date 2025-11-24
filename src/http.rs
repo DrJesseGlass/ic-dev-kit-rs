@@ -282,49 +282,86 @@ pub fn extract_query_params(url: &str) -> HashMap<String, String> {
 }
 
 /// Check if a path matches a pattern (with wildcard support)
+fn split_path_parts(value: &str) -> Vec<&str> {
+    value.split('/').filter(|part| !part.is_empty()).collect()
+}
+
+/// Check if a path matches a pattern (with wildcard support)
 pub fn matches_pattern(path: &str, pattern: &str) -> bool {
-    let path_parts: Vec<&str> = path.split('/').collect();
-    let pattern_parts: Vec<&str> = pattern.split('/').collect();
+    fn matches_recursive(path: &[&str], pattern: &[&str]) -> bool {
+        if pattern.is_empty() {
+            return path.is_empty();
+        }
 
-    if path_parts.len() != pattern_parts.len() {
-        return false;
+        match pattern[0] {
+            "*" => {
+                // "*" matches zero or more path segments
+                (0..=path.len()).any(|skip| matches_recursive(&path[skip..], &pattern[1..]))
+            }
+            param if param.starts_with(':') => {
+                !path.is_empty() && matches_recursive(&path[1..], &pattern[1..])
+            }
+            literal => {
+                !path.is_empty()
+                    && path[0] == literal
+                    && matches_recursive(&path[1..], &pattern[1..])
+            }
+        }
     }
 
-    for (path_part, pattern_part) in path_parts.iter().zip(pattern_parts.iter()) {
-        if pattern_part == &"*" {
-            continue;
-        }
-        if pattern_part.starts_with(':') {
-            continue;
-        }
-        if path_part != pattern_part {
-            return false;
-        }
-    }
+    let path_parts = split_path_parts(path);
+    let pattern_parts = split_path_parts(pattern);
 
-    true
+    matches_recursive(&path_parts, &pattern_parts)
 }
 
 /// Extract path parameters from a pattern match
 pub fn extract_params(path: &str, pattern: &str) -> HashMap<String, String> {
-    let mut params = HashMap::new();
-    let path_parts: Vec<&str> = path.split('/').collect();
-    let pattern_parts: Vec<&str> = pattern.split('/').collect();
+    fn match_with_params(
+        path: &[&str],
+        pattern: &[&str],
+        params: &mut HashMap<String, String>,
+    ) -> bool {
+        if pattern.is_empty() {
+            return path.is_empty();
+        }
 
-    if path_parts.len() != pattern_parts.len() {
-        return params;
-    }
+        match pattern[0] {
+            "*" => {
+                for skip in 0..=path.len() {
+                    let mut snapshot = params.clone();
+                    if match_with_params(&path[skip..], &pattern[1..], &mut snapshot) {
+                        *params = snapshot;
+                        return true;
+                    }
+                }
+                false
+            }
+            param if param.starts_with(':') => {
+                if path.is_empty() {
+                    return false;
+                }
 
-    for (path_part, pattern_part) in path_parts.iter().zip(pattern_parts.iter()) {
-        if pattern_part.starts_with(':') {
-            let param_name = &pattern_part[1..];
-            params.insert(param_name.to_string(), path_part.to_string());
-        } else if path_part != pattern_part {
-            return HashMap::new();
+                params.insert(param[1..].to_string(), path[0].to_string());
+                match_with_params(&path[1..], &pattern[1..], params)
+            }
+            literal => {
+                !path.is_empty()
+                    && path[0] == literal
+                    && match_with_params(&path[1..], &pattern[1..], params)
+            }
         }
     }
 
-    params
+    let mut params = HashMap::new();
+    let path_parts = split_path_parts(path);
+    let pattern_parts = split_path_parts(pattern);
+
+    if match_with_params(&path_parts, &pattern_parts, &mut params) {
+        params
+    } else {
+        HashMap::new()
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -508,6 +545,7 @@ mod tests {
         assert!(matches_pattern("/api/test", "/api/test"));
         assert!(matches_pattern("/api/test", "/api/*"));
         assert!(matches_pattern("/api/v1/users", "*/users"));
+        assert!(matches_pattern("/api/v1/users/123", "*/users/*"));
         assert!(!matches_pattern("/api/test", "/api/other"));
     }
 
@@ -522,6 +560,9 @@ mod tests {
         );
         assert_eq!(params.get("userId"), Some(&"123".to_string()));
         assert_eq!(params.get("postId"), Some(&"456".to_string()));
+
+        let params = extract_params("/api/v1/users/123", "*/users/:id");
+        assert_eq!(params.get("id"), Some(&"123".to_string()));
     }
 
     #[test]
@@ -552,22 +593,22 @@ mod tests {
             ("Authorization".to_string(), "Bearer token123".to_string()),
         ];
 
-        assert_eq!(get_header(&headers, "content-type"), Some("application/json"));
-        assert_eq!(get_header(&headers, "Authorization"), Some("Bearer token123"));
+        assert_eq!(
+            get_header(&headers, "content-type"),
+            Some("application/json")
+        );
+        assert_eq!(
+            get_header(&headers, "Authorization"),
+            Some("Bearer token123")
+        );
         assert_eq!(get_header(&headers, "Missing"), None);
     }
 
     #[test]
     fn test_extract_bearer_token() {
-        let headers = vec![(
-            "Authorization".to_string(),
-            "Bearer token123".to_string(),
-        )];
+        let headers = vec![("Authorization".to_string(), "Bearer token123".to_string())];
 
-        assert_eq!(
-            extract_bearer_token(&headers),
-            Some("token123".to_string())
-        );
+        assert_eq!(extract_bearer_token(&headers), Some("token123".to_string()));
 
         let headers = vec![("Authorization".to_string(), "Basic xyz".to_string())];
         assert_eq!(extract_bearer_token(&headers), None);

@@ -312,38 +312,43 @@ pub fn validate_principal_text(text: &str) -> Result<Principal, AuthError> {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  IC CDK Exported Functions (Optional - for standalone use)
+//  Macro for Exporting Auth Endpoints
 // ═══════════════════════════════════════════════════════════════
 
-/// Query to list authorized principals (guarded)
-#[ic_cdk::query(guard = "is_authorized")]
-pub fn get_authorized_principals() -> Vec<Principal> {
-    list_principals().unwrap_or_default()
+#[macro_export]
+macro_rules! export_auth_endpoints {
+    () => {
+        fn is_authorized() -> Result<(), String> {
+            $crate::auth::is_authorized()
+        }
+
+        #[ic_cdk::update(guard = "is_authorized")]
+        fn authorize_principal(principal: candid::Principal) {
+            let _ = $crate::auth::add_principal(principal);
+        }
+
+        #[ic_cdk::update(guard = "is_authorized")]
+        fn deauthorize_principal(principal: candid::Principal) -> String {
+            $crate::auth::remove_principal(principal).unwrap_or_else(|e| e)
+        }
+
+        #[ic_cdk::query(guard = "is_authorized")]
+        fn get_authorized_principals() -> Vec<candid::Principal> {
+            $crate::auth::list_principals().unwrap_or_default()
+        }
+
+        #[ic_cdk::query(guard = "is_authorized")]
+        fn check_principal_authorized(principal: candid::Principal) -> bool {
+            $crate::auth::is_principal_authorized(principal).unwrap_or(false)
+        }
+
+        #[ic_cdk::query(guard = "is_authorized")]
+        fn get_authorized_count() -> usize {
+            $crate::auth::list_principals().map(|list| list.len()).unwrap_or(0)
+        }
+    };
 }
 
-/// Update to add an authorized principal (guarded)
-#[ic_cdk::update(guard = "is_authorized")]
-pub fn authorize_principal(principal: Principal) {
-    let _ = add_principal(principal);
-}
-
-/// Update to remove an authorized principal (guarded)
-#[ic_cdk::update(guard = "is_authorized")]
-pub fn deauthorize_principal(principal: Principal) -> String {
-    remove_principal(principal).unwrap_or_else(|e| format!("Error: {}", e))
-}
-
-/// Query to check if a principal is authorized (guarded)
-#[ic_cdk::query(guard = "is_authorized")]
-pub fn check_principal_authorized(principal: Principal) -> bool {
-    is_principal_authorized(principal).unwrap_or(false)
-}
-
-/// Query to get count of authorized principals (guarded)
-#[ic_cdk::query(guard = "is_authorized")]
-pub fn get_authorized_count() -> usize {
-    list_principals().map(|list| list.len()).unwrap_or(0)
-}
 
 #[cfg(test)]
 mod tests {

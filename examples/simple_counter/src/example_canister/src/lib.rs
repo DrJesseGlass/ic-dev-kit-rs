@@ -99,28 +99,7 @@ fn list_storage_keys() -> Vec<String> {
 //  Auth Functions
 // ═══════════════════════════════════════════════════════════════
 
-#[ic_cdk::query(guard = "ic_dev_kit_rs::auth::is_authorized")]
-fn whoami() -> candid::Principal {
-    ic_cdk::api::msg_caller()
-}
-
-// Note: These are already provided by ic-dev-kit-rs::auth module:
-// - get_authorized_principals()
-// - authorize_principal(principal)
-// - deauthorize_principal(principal)
-// We just re-export them here for clarity
-
-#[ic_cdk::query(guard = "ic_dev_kit_rs::auth::is_authorized")]
-fn get_admins() -> Vec<candid::Principal> {
-    ic_dev_kit_rs::auth::list_principals().unwrap_or_default()
-}
-
-#[ic_cdk::update(guard = "ic_dev_kit_rs::auth::is_authorized")]
-fn add_admin(principal: candid::Principal) -> Result<String, String> {
-    ic_dev_kit_rs::auth::add_principal(principal)?;
-    ic_dev_kit_rs::telemetry::log_info(&format!("Added admin: {}", principal));
-    Ok(format!("Added admin: {}", principal))
-}
+ic_dev_kit_rs::export_auth_endpoints!();
 
 // ═══════════════════════════════════════════════════════════════
 //  Telemetry Functions

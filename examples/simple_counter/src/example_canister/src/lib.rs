@@ -141,28 +141,18 @@ fn init() {
 
 #[ic_cdk::post_upgrade]
 fn post_upgrade() {
-    // Restore auth state
-    let auth_bytes = STORAGE.with(|s| {
-        ic_dev_kit_rs::storage::load_bytes(s, "__auth__")
-    });
-    ic_dev_kit_rs::auth::init_from_saved(auth_bytes);
-    ic_dev_kit_rs::telemetry::init();
+    STORAGE.with(|s| {
+        // Restore auth
+        let auth_bytes = ic_dev_kit_rs::storage::load_bytes(s, "__auth__");
+        ic_dev_kit_rs::auth::init_from_saved(auth_bytes);
 
-    // Restore counter
-    let counter_bytes = STORAGE.with(|s| {
-        ic_dev_kit_rs::storage::load_bytes(s, "counter")
-    });
-
-    if let Some(bytes) = counter_bytes {
-        if bytes.len() == 8 {
-            let counter_value = u64::from_le_bytes(bytes.try_into().unwrap());
-            COUNTER.with(|c| {
-                *c.borrow_mut() = counter_value;
-            });
-            ic_dev_kit_rs::telemetry::log_info(&format!("Restored counter: {}", counter_value));
+        // Restore counter
+        if let Some(counter) = ic_dev_kit_rs::storage::load_candid::<u64, _>(s, "counter") {
+            COUNTER.with(|c| *c.borrow_mut() = counter);
         }
-    }
+    });
 
+    ic_dev_kit_rs::telemetry::init();
     ic_dev_kit_rs::telemetry::log_info("Example canister upgraded");
 }
 

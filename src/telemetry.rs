@@ -62,7 +62,7 @@ impl MonitoringAuth {
     pub fn add_monitoring_principal(&self, principal: Principal) {
         self.principals.borrow_mut().insert(principal);
     }
-    
+
     pub fn remove_monitoring_principal(&self, principal: &Principal) {
         self.principals.borrow_mut().remove(principal);
     }

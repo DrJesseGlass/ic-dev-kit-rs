@@ -59,14 +59,12 @@ impl MonitoringAuth {
         ic_cdk::api::is_controller(principal)
     }
 
-    pub fn add_monitoring_principal(&self, principal: Principal) -> TelemetryResult<()> {
+    pub fn add_monitoring_principal(&self, principal: Principal) {
         self.principals.borrow_mut().insert(principal);
-        Ok(())
     }
-
-    pub fn remove_monitoring_principal(&self, principal: &Principal) -> TelemetryResult<()> {
+    
+    pub fn remove_monitoring_principal(&self, principal: &Principal) {
         self.principals.borrow_mut().remove(principal);
-        Ok(())
     }
 
     pub fn list_monitoring_principals(&self) -> Vec<Principal> {

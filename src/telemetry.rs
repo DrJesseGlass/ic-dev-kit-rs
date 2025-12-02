@@ -138,7 +138,7 @@ pub fn init_from_saved(
 //  Helper Functions
 // ═══════════════════════════════════════════════════════════════
 
-fn with_auth<R, F>(f: F) -> R
+fn with_monitoring_auth<R, F>(f: F) -> R
 where
     F: FnOnce(&MonitoringAuth) -> R,
 {
@@ -211,6 +211,7 @@ pub fn collect_metrics() {
 
 pub fn get_information(request: GetInformationRequest) -> GetInformationResponse<'static> {
     canistergeek_ic_rust::get_information(request)
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  Public API - Logging

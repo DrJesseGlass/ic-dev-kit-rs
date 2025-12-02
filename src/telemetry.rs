@@ -171,7 +171,7 @@ pub fn is_monitoring_authorized() -> Result<(), String> {
     }
 
     // Check if monitoring principal
-    let is_monitoring = with_monitoring_auth(|auth| auth.is_monitoring_principal(&caller));
+    let is_monitoring = with_monitoring_auth(|auth| auth.is_monitoring_authorized(&caller));
     if is_monitoring {
         return Ok(());
     }
@@ -255,7 +255,32 @@ pub fn get_canister_log(request: CanisterLogRequest) -> Option<CanisterLogRespon
 //  Persistence (for upgrade)
 // ═══════════════════════════════════════════════════════════════
 
-/// Save monitoring principals to bytes
+/// Save all telemetry state to bytes (for pre_upgrade)
+pub fn save_to_bytes() -> Vec<u8> {
+    let monitor_data = canistergeek_ic_rust::monitor::pre_upgrade_stable_data();
+    let logger_data = canistergeek_ic_rust::logger::pre_upgrade_stable_data();
+    let principals = list_monitoring_principals();
+
+    candid::encode_args((monitor_data, logger_data, principals)).unwrap_or_default()
+}
+
+/// Initialize telemetry from saved bytes (for post_upgrade)
+pub fn init_from_bytes(bytes: Option<Vec<u8>>) {
+    if let Some(data) = bytes {
+        if let Ok((monitor_data, logger_data, principals)) = candid::decode_args::<(
+            canistergeek_ic_rust::monitor::PostUpgradeStableData,
+            canistergeek_ic_rust::logger::PostUpgradeStableData,
+            Vec<Principal>,
+        )>(&data) {
+            init_from_saved(Some(monitor_data), Some(logger_data), Some(principals));
+            return;
+        }
+    }
+    // Fallback to fresh init if restore fails
+    init();
+}
+
+/// Save monitoring principals to bytes (legacy, kept for compatibility)
 pub fn save_principals_to_bytes() -> Vec<u8> {
     let principals = list_monitoring_principals();
     candid::encode_args((&principals,)).unwrap_or_default()

@@ -72,16 +72,6 @@ impl MonitoringAuth {
     pub fn list_monitoring_principals(&self) -> Vec<Principal> {
         self.principals.borrow().iter().cloned().collect()
     }
-
-    pub fn check_access(&self) -> TelemetryResult<()> {
-        let caller = ic_cdk::api::msg_caller();
-
-        if self.is_controller(&caller) || self.is_monitoring_authorized(&caller) {
-            Ok(())
-        } else {
-            Err(TelemetryError::Unauthorized)
-        }
-    }
 }
 
 impl Default for MonitoringAuth {
@@ -95,7 +85,7 @@ impl Default for MonitoringAuth {
 // ═══════════════════════════════════════════════════════════════
 
 thread_local! {
-    static AUTH: RefCell<Option<MonitoringAuth>> = RefCell::new(None);
+    static MONITORING_AUTH: RefCell<Option<MonitoringAuth>> = RefCell::new(None);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -104,14 +94,14 @@ thread_local! {
 
 /// Initialize telemetry system
 pub fn init() {
-    AUTH.with(|a| {
+    MONITORING_AUTH.with(|a| {
         *a.borrow_mut() = Some(MonitoringAuth::new());
     });
 }
 
 /// Initialize with specific monitoring principals
 pub fn init_with_principals(principals: Vec<Principal>) {
-    AUTH.with(|a| {
+    MONITORING_AUTH.with(|a| {
         *a.borrow_mut() = Some(MonitoringAuth::with_principals(principals));
     });
 }
@@ -133,7 +123,7 @@ pub fn init_from_saved(
     }
 
     // Initialize auth
-    AUTH.with(|a| {
+    MONITORING_AUTH.with(|a| {
         *a.borrow_mut() = Some(
             if let Some(p) = principals {
                 MonitoringAuth::with_principals(p)
@@ -152,11 +142,11 @@ fn with_auth<R, F>(f: F) -> R
 where
     F: FnOnce(&MonitoringAuth) -> R,
 {
-    AUTH.with(|a| {
+    MONITORING_AUTH.with(|a| {
         let auth_ref = a.borrow();
         let auth = auth_ref
             .as_ref()
-            .expect("Auth not initialized - call telemetry::init() first");
+            .expect("Telemetry not initialized - call telemetry::init() first");
         f(auth)
     })
 }
@@ -165,59 +155,62 @@ where
 //  Public API - Authorization
 // ═══════════════════════════════════════════════════════════════
 
-/// Guard function for telemetry endpoints
+/// Guard function for telemetry viewing endpoints
+/// Allows: monitoring principals, admins, or controllers
 pub fn is_monitoring_authorized() -> Result<(), String> {
-    with_auth(|auth| {
-        auth.check_access()
-            .map_err(|e| format!("Monitoring authorization failed: {}", e))
-    })
+    let caller = ic_cdk::api::msg_caller();
+
+    // Check if controller
+    if ic_cdk::api::is_controller(&caller) {
+        return Ok(());
+    }
+
+    // Check if admin (from auth module)
+    if crate::auth::is_authorized().is_ok() {
+        return Ok(());
+    }
+
+    // Check if monitoring principal
+    let is_monitoring = with_monitoring_auth(|auth| auth.is_monitoring_principal(&caller));
+    if is_monitoring {
+        return Ok(());
+    }
+
+    Err("Monitoring authorization failed: caller is not a controller, admin, or monitoring principal".to_string())
 }
 
-/// Add a principal to the monitoring allowlist
-pub fn add_monitoring_principal(principal: Principal) -> Result<(), String> {
-    with_auth(|auth| {
-        auth.add_monitoring_principal(principal)
-            .map_err(|e| format!("Failed to add monitoring principal: {}", e))
-    })
+/// Add a principal to the monitoring allowlist (requires admin)
+pub fn add_monitoring_principal(principal: Principal) {
+    with_monitoring_auth(|auth| auth.add_monitoring_principal(principal));
 }
 
-/// Remove a principal from the monitoring allowlist
-pub fn remove_monitoring_principal(principal: Principal) -> Result<(), String> {
-    with_auth(|auth| {
-        auth.remove_monitoring_principal(&principal)
-            .map_err(|e| format!("Failed to remove monitoring principal: {}", e))
-    })
+/// Remove a principal from the monitoring allowlist (requires admin)
+pub fn remove_monitoring_principal(principal: Principal) {
+    with_monitoring_auth(|auth| auth.remove_monitoring_principal(&principal));
 }
 
 /// List all monitoring principals
 pub fn list_monitoring_principals() -> Vec<Principal> {
-    with_auth(|auth| auth.list_monitoring_principals())
+    with_monitoring_auth(|auth| auth.list_monitoring_principals())
 }
 
 // ═══════════════════════════════════════════════════════════════
 //  Public API - Monitoring
 // ═══════════════════════════════════════════════════════════════
 
-/// Update canister information (call this in update methods)
-/// This is the new API method that replaces collect_metrics
 pub fn update_information() {
-    use canistergeek_ic_rust::api_type::{UpdateInformationRequest, CollectMetricsRequestType};
-
     let request = UpdateInformationRequest {
         metrics: Some(CollectMetricsRequestType::normal),
     };
     canistergeek_ic_rust::update_information(request);
 }
 
-/// Alternative: use the shortcut function
 pub fn collect_metrics() {
     canistergeek_ic_rust::monitor::collect_metrics();
 }
 
-/// Get canister information
 pub fn get_information(request: GetInformationRequest) -> GetInformationResponse<'static> {
     canistergeek_ic_rust::get_information(request)
-}
 
 // ═══════════════════════════════════════════════════════════════
 //  Public API - Logging
@@ -261,45 +254,6 @@ pub fn get_canister_log(request: CanisterLogRequest) -> Option<CanisterLogRespon
 //  Persistence (for upgrade)
 // ═══════════════════════════════════════════════════════════════
 
-/// Save monitoring principals to bytes for stable storage
-///
-/// For pre_upgrade, use canistergeek_ic_rust functions directly since they
-/// return non-cloneable references:
-///
-/// # Example
-/// ```rust,ignore
-/// #[ic_cdk::pre_upgrade]
-/// fn pre_upgrade() {
-///     let monitor = canistergeek_ic_rust::monitor::pre_upgrade_stable_data();
-///     let logger = canistergeek_ic_rust::logger::pre_upgrade_stable_data();
-///     let principals = ic_dev_kit_rs::telemetry::save_principals_to_bytes();
-///
-///     ic_cdk::storage::stable_save((monitor, logger, principals))
-///         .expect("Failed to save telemetry");
-/// }
-///
-/// #[ic_cdk::post_upgrade]
-/// fn post_upgrade() {
-///     use canistergeek_ic_rust::{monitor, logger};
-///
-///     let (monitor_data, logger_data, principals_bytes): (
-///         monitor::PostUpgradeStableData,
-///         logger::PostUpgradeStableData,
-///         Vec<u8>,
-///     ) = ic_cdk::storage::stable_restore().expect("Failed to restore");
-///
-///     let principals = candid::decode_args(&principals_bytes)
-///         .ok()
-///         .map(|(p,): (Vec<Principal>,)| p);
-///
-///     ic_dev_kit_rs::telemetry::init_from_saved(
-///         Some(monitor_data),
-///         Some(logger_data),
-///         principals,
-///     );
-/// }
-/// ```
-
 /// Save monitoring principals to bytes
 pub fn save_principals_to_bytes() -> Vec<u8> {
     let principals = list_monitoring_principals();
@@ -307,43 +261,52 @@ pub fn save_principals_to_bytes() -> Vec<u8> {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  IC CDK Exported Functions (Optional)
+//  Macro for Exporting Telemetry Endpoints
 // ═══════════════════════════════════════════════════════════════
 
-/// Query to get canister information (guarded)
-#[ic_cdk::query(guard = "is_monitoring_authorized")]
-pub fn get_canistergeek_information(request: GetInformationRequest) -> GetInformationResponse<'static> {
-    get_information(request)
-}
+#[macro_export]
+macro_rules! export_telemetry_endpoints {
+    () => {
+        fn is_monitoring_authorized() -> Result<(), String> {
+            $crate::telemetry::is_monitoring_authorized()
+        }
 
-/// Update to update canister information (guarded)
-#[ic_cdk::update(guard = "is_monitoring_authorized")]
-pub fn update_canistergeek_information(request: UpdateInformationRequest) {
-    canistergeek_ic_rust::update_information(request);
-}
+        #[ic_cdk::query(guard = "is_monitoring_authorized")]
+        fn get_canistergeek_information(
+            request: canistergeek_ic_rust::api_type::GetInformationRequest
+        ) -> canistergeek_ic_rust::api_type::GetInformationResponse<'static> {
+            $crate::telemetry::get_information(request)
+        }
 
-/// Query to get canister log (guarded)
-#[ic_cdk::query(guard = "is_monitoring_authorized")]
-pub fn get_canister_log_query(request: CanisterLogRequest) -> Option<CanisterLogResponse<'static>> {
-    get_canister_log(request)
-}
+        #[ic_cdk::update(guard = "is_monitoring_authorized")]
+        fn update_canistergeek_information(
+            request: canistergeek_ic_rust::api_type::UpdateInformationRequest
+        ) {
+            canistergeek_ic_rust::update_information(request);
+        }
 
-/// Update to add monitoring principal (requires controller or monitoring access)
-#[ic_cdk::update(guard = "is_monitoring_authorized")]
-pub fn authorize_monitoring(principal: Principal) {
-    let _ = add_monitoring_principal(principal);
-}
+        #[ic_cdk::query(guard = "is_monitoring_authorized")]
+        fn get_canister_log_messages(
+            request: canistergeek_ic_rust::api_type::CanisterLogRequest
+        ) -> Option<canistergeek_ic_rust::api_type::CanisterLogResponse<'static>> {
+            $crate::telemetry::get_canister_log(request)
+        }
 
-/// Update to remove monitoring principal (requires controller or monitoring access)
-#[ic_cdk::update(guard = "is_monitoring_authorized")]
-pub fn deauthorize_monitoring(principal: Principal) {
-    let _ = remove_monitoring_principal(principal);
-}
+        #[ic_cdk::update(guard = "is_authorized")]
+        fn authorize_monitoring(principal: candid::Principal) {
+            $crate::telemetry::add_monitoring_principal(principal);
+        }
 
-/// Query to list monitoring principals (guarded)
-#[ic_cdk::query(guard = "is_monitoring_authorized")]
-pub fn get_monitoring_principals() -> Vec<Principal> {
-    list_monitoring_principals()
+        #[ic_cdk::update(guard = "is_authorized")]
+        fn deauthorize_monitoring(principal: candid::Principal) {
+            $crate::telemetry::remove_monitoring_principal(principal);
+        }
+
+        #[ic_cdk::query(guard = "is_monitoring_authorized")]
+        fn get_monitoring_principals() -> Vec<candid::Principal> {
+            $crate::telemetry::list_monitoring_principals()
+        }
+    };
 }
 
 #[cfg(test)]

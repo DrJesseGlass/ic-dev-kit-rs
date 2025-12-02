@@ -21,6 +21,20 @@ thread_local! {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  Auth Functions
+// ═══════════════════════════════════════════════════════════════
+
+// Must call auth macro first (defines is_authorized guard)
+ic_dev_kit_rs::export_auth_endpoints!();
+
+// ═══════════════════════════════════════════════════════════════
+//  Telemetry Functions
+// ═══════════════════════════════════════════════════════════════
+
+// Then telemetry macro (uses is_authorized for admin operations)
+ic_dev_kit_rs::export_telemetry_endpoints!();
+
+// ═══════════════════════════════════════════════════════════════
 //  Counter Functions (Main Feature)
 // ═══════════════════════════════════════════════════════════════
 
@@ -51,7 +65,7 @@ fn get_counter() -> u64 {
     COUNTER.with(|c| *c.borrow())
 }
 
-#[ic_cdk::update(guard = "ic_dev_kit_rs::auth::is_authorized")]
+#[ic_cdk::update(guard = "is_authorized")]
 fn reset_counter() -> String {
     ic_dev_kit_rs::telemetry::log_warning("Counter reset by admin");
 
@@ -70,7 +84,7 @@ fn reset_counter() -> String {
 //  Storage Demo Functions
 // ═══════════════════════════════════════════════════════════════
 
-#[ic_cdk::update(guard = "ic_dev_kit_rs::auth::is_authorized")]
+#[ic_cdk::update(guard = "is_authorized")]
 fn store_message(key: String, message: String) -> String {
     ic_dev_kit_rs::telemetry::log_info(&format!("Storing message: {}", key));
 
@@ -94,23 +108,6 @@ fn list_storage_keys() -> Vec<String> {
     // Simple implementation - in production you'd want a better index
     vec!["counter".to_string()] // Just show the counter for now
 }
-
-// ═══════════════════════════════════════════════════════════════
-//  Auth Functions
-// ═══════════════════════════════════════════════════════════════
-
-ic_dev_kit_rs::export_auth_endpoints!();
-
-// ═══════════════════════════════════════════════════════════════
-//  Telemetry Functions
-// ═══════════════════════════════════════════════════════════════
-
-// Note: These are provided by ic-dev-kit-rs::telemetry:
-// - get_canistergeek_information(request)
-// - update_canistergeek_information(request)
-// - get_canister_log_query(request)
-// - authorize_monitoring(principal)
-// - get_monitoring_principals()
 
 // We add a simple status query
 #[ic_cdk::query]

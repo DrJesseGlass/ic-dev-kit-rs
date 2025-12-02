@@ -295,27 +295,28 @@ macro_rules! export_telemetry_endpoints {
             $crate::telemetry::is_monitoring_authorized()
         }
 
-        #[ic_cdk::query(guard = "is_monitoring_authorized")]
+        #[ic_cdk::query(name = "getCanistergeekInformation", guard = "is_monitoring_authorized")]
         fn get_canistergeek_information(
             request: canistergeek_ic_rust::api_type::GetInformationRequest
         ) -> canistergeek_ic_rust::api_type::GetInformationResponse<'static> {
             $crate::telemetry::get_information(request)
         }
 
-        #[ic_cdk::update(guard = "is_monitoring_authorized")]
+        #[ic_cdk::update(name = "updateCanistergeekInformation", guard = "is_monitoring_authorized")]
         fn update_canistergeek_information(
             request: canistergeek_ic_rust::api_type::UpdateInformationRequest
         ) {
             canistergeek_ic_rust::update_information(request);
         }
 
-        #[ic_cdk::query(guard = "is_monitoring_authorized")]
+        #[ic_cdk::query(name = "getCanisterLog", guard = "is_monitoring_authorized")]
         fn get_canister_log_messages(
             request: canistergeek_ic_rust::api_type::CanisterLogRequest
         ) -> Option<canistergeek_ic_rust::api_type::CanisterLogResponse<'static>> {
             $crate::telemetry::get_canister_log(request)
         }
 
+        // Keep monitoring auth endpoints in snake_case (our own API)
         #[ic_cdk::update(guard = "is_authorized")]
         fn authorize_monitoring(principal: candid::Principal) {
             $crate::telemetry::add_monitoring_principal(principal);

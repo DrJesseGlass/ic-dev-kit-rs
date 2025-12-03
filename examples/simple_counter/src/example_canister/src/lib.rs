@@ -147,12 +147,17 @@ fn post_upgrade() {
         ic_dev_kit_rs::auth::init_from_saved(auth_bytes);
 
         // Restore counter
-        if let Some(counter) = ic_dev_kit_rs::storage::load_candid::<u64, _>(s, "counter") {
-            COUNTER.with(|c| *c.borrow_mut() = counter);
+        if let Some(bytes) = ic_dev_kit_rs::storage::load_bytes(s, "counter") {
+            if let Ok(arr) = bytes.try_into() {
+                COUNTER.with(|c| *c.borrow_mut() = u64::from_le_bytes(arr));
+            }
         }
+
+        // Restore telemetry
+        let telemetry_bytes = ic_dev_kit_rs::storage::load_bytes(s, "__telemetry__");
+        ic_dev_kit_rs::telemetry::init_from_bytes(telemetry_bytes);
     });
 
-    ic_dev_kit_rs::telemetry::init();
     ic_dev_kit_rs::telemetry::log_info("Example canister upgraded");
 }
 
@@ -162,6 +167,7 @@ fn pre_upgrade() {
     let auth_bytes = ic_dev_kit_rs::auth::save_to_bytes();
     STORAGE.with(|s| {
         ic_dev_kit_rs::storage::save_bytes(s, "__auth__", auth_bytes);
+        ic_dev_kit_rs::storage::save_bytes(s, "__telemetry__", ic_dev_kit_rs::telemetry::save_to_bytes());
     });
 
     // Counter is already saved on each increment

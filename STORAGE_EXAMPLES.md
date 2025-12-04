@@ -2,29 +2,11 @@
 
 ## Overview
 
-The storage module provides **generic, type-safe wrappers** for saving/loading any CandidType to IC stable storage. It eliminates repetitive code by using Rust generics.
+The storage module provides **type-safe wrappers** for saving/loading any `CandidType` to IC stable storage using Candid serialization.
 
-## Core Concept
+## Setup
 
-Instead of writing separate functions for each type combination:
-```rust
-// ❌ OLD WAY - repetitive
-save_u8_hashmap(registry, key, map);
-save_i8_hashmap(registry, key, map);
-save_string_hashmap(registry, key, map);
-```
-
-Use generic functions that work with any type:
-```rust
-// ✅ NEW WAY - one function for all
-save_hashmap(registry, "chains", &my_u8_map)?;
-save_hashmap(registry, "statuses", &my_i8_map)?;
-save_hashmap(registry, "names", &my_string_map)?;
-```
-
-## Setup in Your Canister
-
-### 1. Define Your REGISTRIES
+### 1. Define Your Storage Registry
 
 ```rust
 use ic_stable_structures::{
@@ -40,7 +22,7 @@ thread_local! {
     static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
         RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
 
-    pub static REGISTRIES: RefCell<StableBTreeMap<String, Vec<u8>, Memory>> = RefCell::new(
+    pub static REGISTRY: RefCell<StableBTreeMap<String, Vec<u8>, Memory>> = RefCell::new(
         StableBTreeMap::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(1))),
         )
@@ -48,192 +30,18 @@ thread_local! {
 }
 ```
 
-### 2. Implement StorageRegistry Trait
+### 2. Use Storage Functions
 
-```rust
-use ic_dev_kit_rs::storage::StorageRegistry;
+The `StorageRegistry` trait is already implemented for `StableBTreeMap<String, Vec<u8>, Memory>`, so you can use the storage functions directly.
 
-impl StorageRegistry for StableBTreeMap<String, Vec<u8>, Memory> {
-    fn insert(&mut self, key: String, value: Vec<u8>) {
-        self.insert(key, value);
-    }
-    
-    fn get(&self, key: &String) -> Option<Vec<u8>> {
-        self.get(key)
-    }
-    
-    fn remove(&mut self, key: &String) -> Option<Vec<u8>> {
-        self.remove(key)
-    }
-}
-```
+## Core Functions
 
-## Usage Patterns
+### `save_candid` / `load_candid`
 
-### Example 1: Configuration HashMaps (like your chain IDs)
+Save and load any type that implements `CandidType`:
 
 ```rust
 use ic_dev_kit_rs::storage;
-use std::collections::HashMap;
-
-// Define your config
-fn default_chain_ids() -> HashMap<u8, String> {
-    let mut map = HashMap::new();
-    map.insert(0, "ICP".to_string());
-    map.insert(1, "Ethereum".to_string());
-    map.insert(2, "Bitcoin".to_string());
-    map.insert(3, "Solana".to_string());
-    map
-}
-
-thread_local! {
-    static CHAIN_IDS: RefCell<HashMap<u8, String>> = RefCell::new(default_chain_ids());
-}
-
-// Save to stable storage
-pub fn save_chain_ids() {
-    CHAIN_IDS.with(|map| {
-        storage::with_registry_mut(&REGISTRIES, |reg| {
-            storage::save_hashmap(reg, "chain_ids", &map.borrow())
-        })
-    }).unwrap();
-}
-
-// Load from stable storage
-pub fn load_chain_ids() {
-    CHAIN_IDS.with(|map| {
-        let loaded: HashMap<u8, String> = storage::with_registry_ref(&REGISTRIES, |reg| {
-            storage::load_hashmap(reg, "chain_ids")
-        });
-        *map.borrow_mut() = loaded;
-    });
-}
-```
-
-### Example 2: Status Maps (like your session/user statuses)
-
-```rust
-// Session statuses with i8 keys
-fn default_session_statuses() -> HashMap<i8, String> {
-    let mut map = HashMap::new();
-    map.insert(-1, "rejected".to_string());
-    map.insert(0, "pending".to_string());
-    map.insert(1, "approved".to_string());
-    map
-}
-
-thread_local! {
-    static SESSION_STATUSES: RefCell<HashMap<i8, String>> = 
-        RefCell::new(default_session_statuses());
-}
-
-pub fn save_session_statuses() {
-    SESSION_STATUSES.with(|map| {
-        storage::with_registry_mut(&REGISTRIES, |reg| {
-            storage::save_hashmap(reg, "session_statuses", &map.borrow())
-        })
-    }).unwrap();
-}
-
-pub fn load_session_statuses() {
-    SESSION_STATUSES.with(|map| {
-        let loaded: HashMap<i8, String> = storage::with_registry_ref(&REGISTRIES, |reg| {
-            storage::load_hashmap(reg, "session_statuses")
-        });
-        *map.borrow_mut() = loaded;
-    });
-}
-```
-
-### Example 3: Save All Configs at Once (like your pattern)
-
-```rust
-pub fn save_all_config() {
-    storage::with_registry_mut(&REGISTRIES, |reg| {
-        // Save chain IDs
-        CHAIN_IDS.with(|map| {
-            let _ = storage::save_hashmap(reg, "chain_ids", &map.borrow());
-        });
-        
-        // Save session statuses
-        SESSION_STATUSES.with(|map| {
-            let _ = storage::save_hashmap(reg, "session_statuses", &map.borrow());
-        });
-        
-        // Save user statuses
-        USER_STATUSES.with(|map| {
-            let _ = storage::save_hashmap(reg, "user_statuses", &map.borrow());
-        });
-    });
-}
-
-pub fn load_all_config() {
-    // Load chain IDs
-    CHAIN_IDS.with(|map| {
-        let loaded = storage::with_registry_ref(&REGISTRIES, |reg| {
-            storage::load_hashmap(reg, "chain_ids")
-        });
-        *map.borrow_mut() = loaded;
-    });
-    
-    // Load session statuses
-    SESSION_STATUSES.with(|map| {
-        let loaded = storage::with_registry_ref(&REGISTRIES, |reg| {
-            storage::load_hashmap(reg, "session_statuses")
-        });
-        *map.borrow_mut() = loaded;
-    });
-    
-    // Load user statuses
-    USER_STATUSES.with(|map| {
-        let loaded = storage::with_registry_ref(&REGISTRIES, |reg| {
-            storage::load_hashmap(reg, "user_statuses")
-        });
-        *map.borrow_mut() = loaded;
-    });
-}
-```
-
-### Example 4: HashSets (like Principal lists)
-
-```rust
-use candid::Principal;
-use std::collections::HashSet;
-
-thread_local! {
-    static ALLOWED_USERS: RefCell<HashSet<Principal>> = RefCell::new(HashSet::new());
-}
-
-pub fn save_allowed_users() {
-    ALLOWED_USERS.with(|set| {
-        storage::with_registry_mut(&REGISTRIES, |reg| {
-            storage::save_hashset(reg, "allowed_users", &set.borrow())
-        })
-    }).unwrap();
-}
-
-pub fn load_allowed_users() {
-    ALLOWED_USERS.with(|set| {
-        let loaded: HashSet<Principal> = storage::with_registry_ref(&REGISTRIES, |reg| {
-            storage::load_hashset(reg, "allowed_users")
-        });
-        *set.borrow_mut() = loaded;
-    });
-}
-
-// Or use the convenience function for principals specifically
-pub fn save_principals_convenience() {
-    ALLOWED_USERS.with(|set| {
-        storage::with_registry_mut(&REGISTRIES, |reg| {
-            storage::save_principals(reg, "allowed_users", &set.borrow())
-        })
-    }).unwrap();
-}
-```
-
-### Example 5: Any Custom Type
-
-```rust
 use candid::{CandidType, Deserialize};
 
 #[derive(CandidType, Deserialize, Clone)]
@@ -243,90 +51,215 @@ struct MyConfig {
     features: Vec<String>,
 }
 
-pub fn save_my_config(config: &MyConfig) {
-    storage::with_registry_mut(&REGISTRIES, |reg| {
-        storage::save_data(reg, "my_config", config)
-    }).unwrap();
+// Save
+pub fn save_config(config: &MyConfig) -> Result<(), String> {
+    REGISTRY.with(|reg| {
+        storage::save_candid(reg, "config", config)
+    })
 }
 
-pub fn load_my_config() -> Option<MyConfig> {
-    storage::with_registry_ref(&REGISTRIES, |reg| {
-        storage::load_data(reg, "my_config")
+// Load
+pub fn load_config() -> Option<MyConfig> {
+    REGISTRY.with(|reg| {
+        storage::load_candid(reg, "config")
     })
 }
 ```
 
-## In Upgrade Hooks
+### `save_bytes` / `load_bytes`
+
+For raw binary data (model weights, images, etc.):
 
 ```rust
-#[ic_cdk::pre_upgrade]
-fn pre_upgrade() {
-    // Save all config
-    save_all_config();
-    
-    // Save other data
-    save_allowed_users();
-    save_my_config(&current_config);
+use ic_dev_kit_rs::storage;
+
+pub fn save_model_weights(weights: Vec<u8>) {
+    REGISTRY.with(|reg| {
+        storage::save_bytes(reg, "model_weights", weights);
+    });
 }
 
-#[ic_cdk::post_upgrade]
-fn post_upgrade() {
-    // Load all config
-    load_all_config();
-    
-    // Load other data
-    load_allowed_users();
-    if let Some(config) = load_my_config() {
-        // Use config
+pub fn load_model_weights() -> Option<Vec<u8>> {
+    REGISTRY.with(|reg| {
+        storage::load_bytes(reg, "model_weights")
+    })
+}
+```
+
+### Utility Functions
+
+```rust
+use ic_dev_kit_rs::storage;
+
+// Check if key exists
+pub fn has_config() -> bool {
+    REGISTRY.with(|reg| storage::exists(reg, "config"))
+}
+
+// Get size of stored data
+pub fn get_config_size() -> Option<usize> {
+    REGISTRY.with(|reg| storage::size(reg, "config"))
+}
+
+// Delete entry
+pub fn delete_config() -> bool {
+    REGISTRY.with(|reg| storage::delete(reg, "config"))
+}
+```
+
+## Common Patterns
+
+### Saving Collections
+
+Since `save_candid` works with any `CandidType`, you can save collections directly:
+
+```rust
+use std::collections::HashMap;
+use candid::Principal;
+
+// HashMap
+pub fn save_chain_ids(map: &HashMap<u8, String>) -> Result<(), String> {
+    REGISTRY.with(|reg| {
+        storage::save_candid(reg, "chain_ids", map)
+    })
+}
+
+pub fn load_chain_ids() -> Option<HashMap<u8, String>> {
+    REGISTRY.with(|reg| {
+        storage::load_candid(reg, "chain_ids")
+    })
+}
+
+// Vec of Principals
+pub fn save_allowed_users(users: &Vec<Principal>) -> Result<(), String> {
+    REGISTRY.with(|reg| {
+        storage::save_candid(reg, "allowed_users", users)
+    })
+}
+
+pub fn load_allowed_users() -> Option<Vec<Principal>> {
+    REGISTRY.with(|reg| {
+        storage::load_candid(reg, "allowed_users")
+    })
+}
+```
+
+### Multiple Configs at Once
+
+```rust
+pub fn save_all_config(
+    chain_ids: &HashMap<u8, String>,
+    session_statuses: &HashMap<i8, String>,
+    allowed_users: &Vec<Principal>,
+) {
+    REGISTRY.with(|reg| {
+        let _ = storage::save_candid(reg, "chain_ids", chain_ids);
+        let _ = storage::save_candid(reg, "session_statuses", session_statuses);
+        let _ = storage::save_candid(reg, "allowed_users", allowed_users);
+    });
+}
+```
+
+### Thread-Local State with Persistence
+
+```rust
+use std::collections::HashMap;
+
+fn default_chain_ids() -> HashMap<u8, String> {
+    let mut map = HashMap::new();
+    map.insert(0, "ICP".to_string());
+    map.insert(1, "Ethereum".to_string());
+    map
+}
+
+thread_local! {
+    static CHAIN_IDS: RefCell<HashMap<u8, String>> = RefCell::new(default_chain_ids());
+}
+
+// Save current state to stable storage
+pub fn persist_chain_ids() {
+    CHAIN_IDS.with(|ids| {
+        REGISTRY.with(|reg| {
+            let _ = storage::save_candid(reg, "chain_ids", &*ids.borrow());
+        });
+    });
+}
+
+// Load from stable storage into thread-local
+pub fn restore_chain_ids() {
+    if let Some(loaded) = REGISTRY.with(|reg| {
+        storage::load_candid::<HashMap<u8, String>>(reg, "chain_ids")
+    }) {
+        CHAIN_IDS.with(|ids| {
+            *ids.borrow_mut() = loaded;
+        });
     }
 }
 ```
 
-## Available Generic Functions
+## Upgrade Hooks
 
-### Core Functions
-- `save_data<T>(registry, key, data)` - Save any CandidType
-- `load_data<T>(registry, key)` - Load any CandidType
-- `save_bytes(registry, key, bytes)` - Save raw bytes
-- `load_bytes(registry, key)` - Load raw bytes
-
-### Collection Functions (Generic)
-- `save_hashmap<K, V>(registry, key, map)` - Save any HashMap
-- `load_hashmap<K, V>(registry, key)` - Load any HashMap
-- `save_hashset<T>(registry, key, set)` - Save any HashSet
-- `load_hashset<T>(registry, key)` - Load any HashSet
-
-### Convenience Wrappers
-- `save_principals(registry, key, set)` - Save HashSet<Principal>
-- `load_principals(registry, key)` - Load HashSet<Principal>
-- `save_string_hashmap(registry, key, map)` - Save HashMap<String, String>
-- `load_string_hashmap(registry, key)` - Load HashMap<String, String>
-
-## Benefits
-
-✅ **Type-safe**: Compiler ensures types match  
-✅ **Generic**: Works with any CandidType  
-✅ **No repetition**: One function for all HashMap types  
-✅ **Testable**: Easy to mock StorageRegistry  
-✅ **Flexible**: Works with any storage backend implementing StorageRegistry  
-
-## Migration from Old Code
-
-If you have existing code like:
 ```rust
-// Old
-pub fn save_u8_hashmap_to_stable(key: &str, hashmap: &HashMap<u8, String>) {
-    let hashmap_vec: Vec<(u8, String)> = hashmap.iter().map(|(k, v)| (*k, v.clone())).collect();
-    save_data_to_stable(key, &hashmap_vec);
+#[ic_cdk::pre_upgrade]
+fn pre_upgrade() {
+    // Save thread-local state to stable storage
+    persist_chain_ids();
+    persist_session_statuses();
+    persist_allowed_users();
+}
+
+#[ic_cdk::post_upgrade]
+fn post_upgrade() {
+    // Restore thread-local state from stable storage
+    restore_chain_ids();
+    restore_session_statuses();
+    restore_allowed_users();
 }
 ```
 
-Replace with:
+## Integration with Large Objects
+
+When using `large_objects` with storage, you can save uploaded data directly:
+
 ```rust
-// New
-storage::with_registry_mut(&REGISTRIES, |reg| {
-    storage::save_hashmap(reg, key, hashmap)
-})
+use ic_dev_kit_rs::{large_objects, storage};
+
+#[ic_cdk::update]
+fn finalize_and_save(key: String) -> Result<String, String> {
+    // Get data from upload buffer
+    let data = large_objects::get_buffer_data();
+    if data.is_empty() {
+        return Err("No data in buffer".to_string());
+    }
+    
+    let size = data.len();
+    
+    // Save to stable storage
+    REGISTRY.with(|reg| {
+        storage::save_bytes(reg, &key, data);
+    });
+    
+    Ok(format!("Saved {} bytes to '{}'", size, key))
+}
 ```
 
-The generic function handles the Vec conversion automatically!
+Or use the `generate_upload_endpoints!` macro which handles this automatically:
+
+```rust
+ic_dev_kit_rs::generate_upload_endpoints!(
+    guard = "auth::is_authorized",
+    registry = REGISTRY
+);
+```
+
+## API Reference
+
+| Function | Description |
+|----------|-------------|
+| `save_candid<T>(registry, key, &T)` | Save any CandidType with Candid serialization |
+| `load_candid<T>(registry, key) -> Option<T>` | Load and deserialize a CandidType |
+| `save_bytes(registry, key, Vec<u8>)` | Save raw bytes |
+| `load_bytes(registry, key) -> Option<Vec<u8>>` | Load raw bytes |
+| `exists(registry, key) -> bool` | Check if key exists |
+| `size(registry, key) -> Option<usize>` | Get size of stored value |
+| `delete(registry, key) -> bool` | Delete entry, returns true if existed |

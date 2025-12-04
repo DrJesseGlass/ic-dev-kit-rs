@@ -1,7 +1,25 @@
-//! Text generation features for LLMs
+//! Text generation features for Large Language Models.
 //!
-//! This module provides traits and utilities specifically for Large Language Models
-//! and autoregressive text generation. It requires the "text-generation" feature.
+//! This module provides traits and utilities specifically for autoregressive
+//! text generation with LLMs like GPT, Llama, Qwen, etc.
+//!
+//! Requires the `text-generation` feature.
+//!
+//! # Example
+//!
+//! ```rust,ignore
+//! use ic_dev_kit_rs::text_generation::*;
+//!
+//! let response = generate_autoregressive(
+//!     &mut my_llm,
+//!     "Hello, world!".to_string(),
+//!     &tokenizer,
+//!     &GenerationConfig::default()
+//! )?;
+//!
+//! println!("Generated: {}", response.text);
+//! println!("{}", format_generation_stats(&response));
+//! ```
 
 #![cfg(feature = "text-generation")]
 
@@ -13,21 +31,53 @@ use crate::candle::CandleModel;
 //  Autoregressive Model Traits (for LLMs)
 // ═══════════════════════════════════════════════════════════════
 
-/// Trait for autoregressive text generation models (LLMs)
+/// Trait for autoregressive text generation models (LLMs).
 ///
-/// This trait is specifically for models that generate text token-by-token,
-/// such as GPT, Llama, Qwen, etc.
+/// Extend [`CandleModel`] with text generation capabilities.
+/// Implement this for models that generate text token-by-token.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// impl AutoregressiveModel for MyLlama {
+///     fn init_generation(
+///         &mut self,
+///         prompt: String,
+///         tokenizer: &dyn TokenizerHandle,
+///         config: &GenerationConfig,
+///     ) -> Result<String, String> {
+///         // Tokenize prompt, generate first token
+///         // ...
+///     }
+///
+///     fn generate_next_token(
+///         &mut self,
+///         tokenizer: &dyn TokenizerHandle,
+///     ) -> Result<String, String> {
+///         // Generate next token
+///         // ...
+///     }
+///
+///     fn is_generation_complete(&self) -> bool {
+///         self.last_token == self.eos_token
+///     }
+///
+///     fn generated_token_count(&self) -> usize {
+///         self.token_count
+///     }
+/// }
+/// ```
 pub trait AutoregressiveModel: CandleModel {
-    /// Initialize generation with a prompt and tokenizer
+    /// Initialize generation with a prompt and tokenizer.
     ///
     /// This should:
-    /// - Clear previous generation state
-    /// - Load the tokenizer
-    /// - Tokenize the prompt
-    /// - Generate the first token
+    /// 1. Clear previous generation state
+    /// 2. Tokenize the prompt
+    /// 3. Generate the first token
     ///
     /// # Returns
-    /// * First generated token as text
+    ///
+    /// The first generated token as text.
     fn init_generation(
         &mut self,
         prompt: String,
@@ -35,40 +85,52 @@ pub trait AutoregressiveModel: CandleModel {
         config: &GenerationConfig,
     ) -> Result<String, String>;
 
-    /// Generate the next token in the sequence
+    /// Generate the next token in the sequence.
     ///
     /// # Returns
-    /// * Next token as text
+    ///
+    /// The next token as text.
     fn generate_next_token(
         &mut self,
         tokenizer: &dyn TokenizerHandle,
     ) -> Result<String, String>;
 
-    /// Check if generation is complete (EOS reached)
+    /// Check if generation is complete (EOS reached).
     fn is_generation_complete(&self) -> bool;
 
-    /// Get current token count in generation
+    /// Get current token count in generation.
     fn generated_token_count(&self) -> usize;
 }
 
-/// Handle to a tokenizer
+/// Handle to a tokenizer.
 ///
-/// This abstracts the tokenizer so we can support different tokenizer types
+/// Abstracts the tokenizer implementation so we can support different
+/// tokenizer types (tokenizers, sentencepiece, etc.).
 pub trait TokenizerHandle {
+    /// Encode text to token IDs.
     fn encode(&self, text: &str) -> Result<Vec<u32>, String>;
+    /// Decode token IDs to text.
     fn decode(&self, tokens: &[u32]) -> Result<String, String>;
+    /// Get the vocabulary size.
     fn vocab_size(&self) -> usize;
 }
 
-/// Generation configuration for autoregressive models
+/// Configuration for text generation.
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct GenerationConfig {
+    /// Temperature for sampling (higher = more random). Default: 0.7
     pub temperature: f64,
+    /// Top-p (nucleus) sampling threshold. Default: 0.9
     pub top_p: f64,
+    /// Top-k sampling (None = disabled). Default: None
     pub top_k: Option<u32>,
+    /// Penalty for repeated tokens. Default: 1.1
     pub repeat_penalty: f32,
+    /// Number of recent tokens to consider for repeat penalty. Default: 64
     pub repeat_last_n: usize,
+    /// Random seed for reproducibility. Default: 42
     pub seed: u64,
+    /// Maximum tokens to generate. Default: 100
     pub max_tokens: usize,
 }
 
@@ -90,22 +152,34 @@ impl Default for GenerationConfig {
 //  Generic Autoregressive Generation Function
 // ═══════════════════════════════════════════════════════════════
 
-/// Generate text using any AutoregressiveModel implementation
+/// Generate text using any AutoregressiveModel implementation.
 ///
 /// This is a generic function that works with any model implementing
-/// the AutoregressiveModel trait. It handles:
-/// - Instruction limit monitoring (IC-specific)
+/// the [`AutoregressiveModel`] trait. It handles:
+/// - Instruction limit monitoring (IC-specific, 30B limit)
 /// - Token limit enforcement
 /// - EOS detection
 /// - Error handling
 ///
+/// # Arguments
+///
+/// * `model` - The model to generate with
+/// * `prompt` - The input prompt
+/// * `tokenizer` - The tokenizer handle
+/// * `config` - Generation configuration
+///
 /// # Example
+///
 /// ```rust,ignore
 /// let response = generate_autoregressive(
 ///     &mut my_llm,
-///     "Hello, world!",
+///     "Once upon a time".to_string(),
 ///     &tokenizer,
-///     &GenerationConfig::default()
+///     &GenerationConfig {
+///         max_tokens: 200,
+///         temperature: 0.8,
+///         ..Default::default()
+///     }
 /// )?;
 /// ```
 pub fn generate_autoregressive<T: AutoregressiveModel>(
@@ -159,23 +233,29 @@ pub fn generate_autoregressive<T: AutoregressiveModel>(
     })
 }
 
+/// Response from text generation.
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct GenerationResponse {
+    /// The generated text.
     pub text: String,
+    /// Number of tokens generated.
     pub tokens_generated: usize,
+    /// IC instructions used.
     pub instructions_used: u64,
+    /// Why generation stopped.
     pub stopped_reason: StopReason,
 }
 
+/// Reason why generation stopped.
 #[derive(CandidType, Deserialize, Clone, Debug, PartialEq)]
 pub enum StopReason {
-    /// Generation completed with EOS token
+    /// Generation completed with EOS token.
     EndOfSequence,
-    /// Hit max token limit
+    /// Hit max token limit.
     MaxTokens,
-    /// Hit instruction limit (IC-specific)
+    /// Hit IC instruction limit (30B).
     InstructionLimit,
-    /// Error occurred
+    /// An error occurred.
     Error(String),
 }
 
@@ -183,7 +263,14 @@ pub enum StopReason {
 //  Utility Functions
 // ═══════════════════════════════════════════════════════════════
 
-/// Format generation statistics
+/// Format generation statistics as a human-readable string.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// println!("{}", format_generation_stats(&response));
+/// // Output: "Generated 50 tokens using 1234567890 instructions (completed)"
+/// ```
 pub fn format_generation_stats(response: &GenerationResponse) -> String {
     format!(
         "Generated {} tokens using {} instructions ({})",
@@ -202,10 +289,19 @@ pub fn format_generation_stats(response: &GenerationResponse) -> String {
 //  Tokenizer Helpers
 // ═══════════════════════════════════════════════════════════════
 
+/// Helpers for working with tokenizers.
 pub mod tokenizers {
     use tokenizers::Tokenizer;
 
-    /// Find EOS token from common names
+    /// Find the EOS token from common names.
+    ///
+    /// Checks for common EOS token names in order:
+    /// - `<|endoftext|>` (GPT-style)
+    /// - `<|im_end|>` (ChatML-style)
+    /// - `</s>` (Llama-style)
+    /// - `<eos>` (Generic)
+    ///
+    /// Returns 0 if no known EOS token is found.
     pub fn find_eos_token(tokenizer: &Tokenizer) -> u32 {
         let vocab = tokenizer.get_vocab(true);
 

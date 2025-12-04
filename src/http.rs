@@ -1,4 +1,40 @@
-// HTTP handling module for Internet Computer canisters
+//! HTTP handling module for Internet Computer canisters.
+//!
+//! Provides IC-compatible HTTP request/response types, routing, and utilities.
+//!
+//! # Quick Start
+//!
+//! ```rust,ignore
+//! use ic_dev_kit_rs::http::{self, HttpRequest, HttpResponse};
+//!
+//! #[ic_cdk::query]
+//! fn http_request(req: HttpRequest) -> HttpResponse {
+//!     let path = http::extract_path(&req.url);
+//!
+//!     match (req.method.as_str(), path) {
+//!         ("GET", "/api/status") => {
+//!             http::success_response(&serde_json::json!({"status": "ok"})).unwrap()
+//!         }
+//!         _ => http::HttpError::NotFound.to_response(),
+//!     }
+//! }
+//! ```
+//!
+//! # Router Example
+//!
+//! ```rust,ignore
+//! use ic_dev_kit_rs::http::{Router, HttpMethod, HttpRequest, HttpResponse, HttpResult};
+//!
+//! fn status_handler(_req: HttpRequest) -> HttpResult<HttpResponse> {
+//!     http::success_response(&"ok")
+//! }
+//!
+//! let mut router = Router::new();
+//! router.get("/api/status", status_handler);
+//!
+//! let response = router.handle(request);
+//! ```
+
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
@@ -7,34 +43,65 @@ use std::collections::HashMap;
 //  Error Types
 // ═══════════════════════════════════════════════════════════════
 
+/// HTTP errors with automatic status code mapping.
+///
+/// Each variant maps to an appropriate HTTP status code and can be
+/// converted directly to an [`HttpResponse`].
+///
+/// # Example
+///
+/// ```rust,ignore
+/// fn my_handler(req: HttpRequest) -> HttpResult<HttpResponse> {
+///     if !valid {
+///         return Err(HttpError::bad_request("Invalid input"));
+///     }
+///     // ...
+/// }
+/// ```
 #[derive(Debug, thiserror::Error)]
 pub enum HttpError {
+    /// 405 Method Not Allowed
     #[error("Method not allowed")]
     MethodNotAllowed,
+    /// 404 Not Found
     #[error("Endpoint not found")]
     NotFound,
+    /// 400 Bad Request - invalid request format
     #[error("Invalid request format: {0}")]
     InvalidRequest(String),
+    /// 401 Unauthorized
     #[error("Unauthorized: {0}")]
     Unauthorized(String),
+    /// 500 Internal Server Error
     #[error("Internal server error: {0}")]
     InternalError(String),
+    /// 500 Internal Server Error - serialization failure
     #[error("Serialization error: {0}")]
     SerializationError(String),
+    /// 400 Bad Request
     #[error("Bad request: {0}")]
     BadRequest(String),
+    /// 409 Conflict
     #[error("Conflict: {0}")]
     Conflict(String),
+    /// 422 Unprocessable Entity
     #[error("Unprocessable entity: {0}")]
     UnprocessableEntity(String),
+    /// 403 Forbidden
     #[error("Forbidden: {0}")]
     Forbidden(String),
+    /// Custom status code
     #[error("HTTP {status}: {message}")]
-    Status { status: u16, message: String },
+    Status {
+        /// HTTP status code
+        status: u16,
+        /// Error message
+        message: String,
+    },
 }
 
 impl HttpError {
-    /// Get the HTTP status code for this error
+    /// Get the HTTP status code for this error.
     pub fn status_code(&self) -> u16 {
         match self {
             HttpError::MethodNotAllowed => 405,
@@ -51,16 +118,17 @@ impl HttpError {
         }
     }
 
-    /// Convert to HTTP response automatically
+    /// Convert this error to an HTTP response.
     pub fn to_response(&self) -> HttpResponse {
         error_response(self.status_code(), &self.to_string())
     }
 
-    // Convenience constructors
+    /// Create a 400 Bad Request error.
     pub fn bad_request(msg: impl Into<String>) -> Self {
         HttpError::BadRequest(msg.into())
     }
 
+    /// Create a 404 Not Found error with custom message.
     pub fn not_found(msg: impl Into<String>) -> Self {
         HttpError::Status {
             status: 404,
@@ -68,26 +136,32 @@ impl HttpError {
         }
     }
 
+    /// Create a 401 Unauthorized error.
     pub fn unauthorized(msg: impl Into<String>) -> Self {
         HttpError::Unauthorized(msg.into())
     }
 
+    /// Create a 409 Conflict error.
     pub fn conflict(msg: impl Into<String>) -> Self {
         HttpError::Conflict(msg.into())
     }
 
+    /// Create a 422 Unprocessable Entity error.
     pub fn unprocessable_entity(msg: impl Into<String>) -> Self {
         HttpError::UnprocessableEntity(msg.into())
     }
 
+    /// Create a 403 Forbidden error.
     pub fn forbidden(msg: impl Into<String>) -> Self {
         HttpError::Forbidden(msg.into())
     }
 
+    /// Create a 500 Internal Server Error.
     pub fn internal_error(msg: impl Into<String>) -> Self {
         HttpError::InternalError(msg.into())
     }
 
+    /// Create an error with a custom status code.
     pub fn custom_status(status: u16, msg: impl Into<String>) -> Self {
         HttpError::Status {
             status,
@@ -96,32 +170,45 @@ impl HttpError {
     }
 }
 
+/// Result type for HTTP operations.
 pub type HttpResult<T> = Result<T, HttpError>;
 
 // ═══════════════════════════════════════════════════════════════
 //  HTTP Types
 // ═══════════════════════════════════════════════════════════════
 
-/// HTTP request structure (IC-compatible)
+/// HTTP request structure (IC-compatible).
+///
+/// This matches the format expected by the IC HTTP gateway.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpRequest {
+    /// HTTP method (GET, POST, etc.)
     pub method: String,
+    /// Request URL including path and query string
     pub url: String,
+    /// Request headers as key-value pairs
     pub headers: Vec<(String, String)>,
+    /// Request body as raw bytes
     pub body: Vec<u8>,
 }
 
-/// HTTP response structure (IC-compatible)
+/// HTTP response structure (IC-compatible).
+///
+/// This matches the format expected by the IC HTTP gateway.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpResponse {
+    /// HTTP status code (200, 404, etc.)
     pub status_code: u16,
+    /// Response headers as key-value pairs
     pub headers: Vec<(String, String)>,
+    /// Response body as raw bytes
     pub body: Vec<u8>,
+    /// Whether to upgrade to update call (for certified responses)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub upgrade: Option<bool>,
 }
 
-/// HTTP method enumeration
+/// HTTP method enumeration.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum HttpMethod {
     GET,
@@ -134,6 +221,7 @@ pub enum HttpMethod {
 }
 
 impl HttpMethod {
+    /// Parse an HTTP method from a string (case-insensitive).
     pub fn from_str(method: &str) -> Option<Self> {
         match method.to_uppercase().as_str() {
             "GET" => Some(HttpMethod::GET),
@@ -147,6 +235,7 @@ impl HttpMethod {
         }
     }
 
+    /// Get the method as a static string.
     pub fn as_str(&self) -> &'static str {
         match self {
             HttpMethod::GET => "GET",
@@ -164,6 +253,9 @@ impl HttpMethod {
 //  Response Builders
 // ═══════════════════════════════════════════════════════════════
 
+/// Create a JSON response with the given status code.
+///
+/// Automatically sets `Content-Type: application/json` and CORS headers.
 pub fn json_response(status_code: u16, body: String) -> HttpResponse {
     HttpResponse {
         status_code,
@@ -176,6 +268,9 @@ pub fn json_response(status_code: u16, body: String) -> HttpResponse {
     }
 }
 
+/// Create an error response with JSON body.
+///
+/// Response format: `{"error": "<message>"}`
 pub fn error_response(status_code: u16, error: &str) -> HttpResponse {
     json_response(
         status_code,
@@ -183,12 +278,20 @@ pub fn error_response(status_code: u16, error: &str) -> HttpResponse {
     )
 }
 
+/// Create a success response with JSON-serialized data.
+///
+/// # Errors
+///
+/// Returns [`HttpError::SerializationError`] if serialization fails.
 pub fn success_response<T: Serialize>(data: &T) -> HttpResult<HttpResponse> {
     let json = serde_json::to_string(data)
         .map_err(|e| HttpError::SerializationError(format!("JSON serialization error: {}", e)))?;
     Ok(json_response(200, json))
 }
 
+/// Create a response indicating the request should be upgraded to an update call.
+///
+/// Used for certified queries that need to modify state.
 pub fn upgrade_response() -> HttpResponse {
     HttpResponse {
         status_code: 204,
@@ -198,6 +301,9 @@ pub fn upgrade_response() -> HttpResponse {
     }
 }
 
+/// Create a CORS preflight response.
+///
+/// Responds to OPTIONS requests with appropriate CORS headers.
 pub fn cors_preflight_response() -> HttpResponse {
     HttpResponse {
         status_code: 204,
@@ -217,7 +323,7 @@ pub fn cors_preflight_response() -> HttpResponse {
     }
 }
 
-// Helper to escape JSON strings
+/// Escape special characters in a JSON string.
 fn escape_json(s: &str) -> String {
     s.replace('\\', "\\\\")
         .replace('"', "\\\"")
@@ -230,6 +336,20 @@ fn escape_json(s: &str) -> String {
 //  JSON Utilities
 // ═══════════════════════════════════════════════════════════════
 
+/// Parse JSON from request body bytes.
+///
+/// # Errors
+///
+/// Returns [`HttpError::InvalidRequest`] if the body is not valid UTF-8 or JSON.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// #[derive(Deserialize)]
+/// struct MyData { name: String }
+///
+/// let data: MyData = http::parse_json(&req.body)?;
+/// ```
 pub fn parse_json<T>(body: &[u8]) -> HttpResult<T>
 where
     T: for<'de> Deserialize<'de>,
@@ -241,6 +361,11 @@ where
         .map_err(|e| HttpError::InvalidRequest(format!("JSON parse error: {}", e)))
 }
 
+/// Serialize data to a JSON string.
+///
+/// # Errors
+///
+/// Returns [`HttpError::SerializationError`] if serialization fails.
 pub fn to_json<T>(data: &T) -> HttpResult<String>
 where
     T: Serialize,
@@ -249,6 +374,11 @@ where
         .map_err(|e| HttpError::SerializationError(format!("JSON serialization error: {}", e)))
 }
 
+/// Serialize data to a pretty-printed JSON string.
+///
+/// # Errors
+///
+/// Returns [`HttpError::SerializationError`] if serialization fails.
 pub fn to_json_pretty<T>(data: &T) -> HttpResult<String>
 where
     T: Serialize,
@@ -261,12 +391,25 @@ where
 //  Path Utilities
 // ═══════════════════════════════════════════════════════════════
 
-/// Extract the path from a URL (removes query string)
+/// Extract the path from a URL (removes query string).
+///
+/// # Example
+///
+/// ```rust,ignore
+/// assert_eq!(extract_path("/api/users?page=1"), "/api/users");
+/// ```
 pub fn extract_path(url: &str) -> &str {
     url.split('?').next().unwrap_or(url)
 }
 
-/// Extract query parameters from a URL
+/// Extract query parameters from a URL.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let params = extract_query_params("/api/users?page=1&limit=10");
+/// assert_eq!(params.get("page"), Some(&"1".to_string()));
+/// ```
 pub fn extract_query_params(url: &str) -> HashMap<String, String> {
     let mut params = HashMap::new();
 
@@ -281,12 +424,24 @@ pub fn extract_query_params(url: &str) -> HashMap<String, String> {
     params
 }
 
-/// Check if a path matches a pattern (with wildcard support)
+/// Split a path into parts, filtering empty segments.
 fn split_path_parts(value: &str) -> Vec<&str> {
     value.split('/').filter(|part| !part.is_empty()).collect()
 }
 
-/// Check if a path matches a pattern (with wildcard support)
+/// Check if a path matches a pattern.
+///
+/// Supports:
+/// - Exact matching: `/api/users`
+/// - Wildcards: `/api/*` matches any single segment
+/// - Parameters: `/api/users/:id` matches `/api/users/123`
+///
+/// # Example
+///
+/// ```rust,ignore
+/// assert!(matches_pattern("/api/users/123", "/api/users/:id"));
+/// assert!(matches_pattern("/api/v1/data", "/api/*"));
+/// ```
 pub fn matches_pattern(path: &str, pattern: &str) -> bool {
     fn matches_recursive(path: &[&str], pattern: &[&str]) -> bool {
         if pattern.is_empty() {
@@ -315,7 +470,14 @@ pub fn matches_pattern(path: &str, pattern: &str) -> bool {
     matches_recursive(&path_parts, &pattern_parts)
 }
 
-/// Extract path parameters from a pattern match
+/// Extract path parameters from a pattern match.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let params = extract_params("/api/users/123", "/api/users/:id");
+/// assert_eq!(params.get("id"), Some(&"123".to_string()));
+/// ```
 pub fn extract_params(path: &str, pattern: &str) -> HashMap<String, String> {
     fn match_with_params(
         path: &[&str],
@@ -368,7 +530,15 @@ pub fn extract_params(path: &str, pattern: &str) -> HashMap<String, String> {
 //  Header Utilities
 // ═══════════════════════════════════════════════════════════════
 
-/// Get header value by name (case-insensitive)
+/// Get a header value by name (case-insensitive).
+///
+/// # Example
+///
+/// ```rust,ignore
+/// if let Some(content_type) = get_header(&req.headers, "content-type") {
+///     // ...
+/// }
+/// ```
 pub fn get_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
     headers
         .iter()
@@ -376,7 +546,15 @@ pub fn get_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a
         .map(|(_, v)| v.as_str())
 }
 
-/// Extract bearer token from Authorization header
+/// Extract bearer token from Authorization header.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// if let Some(token) = extract_bearer_token(&req.headers) {
+///     // Validate token...
+/// }
+/// ```
 pub fn extract_bearer_token(headers: &[(String, String)]) -> Option<String> {
     get_header(headers, "Authorization").and_then(|value| {
         if value.starts_with("Bearer ") {
@@ -391,20 +569,35 @@ pub fn extract_bearer_token(headers: &[(String, String)]) -> Option<String> {
 //  HTTP Status Codes
 // ═══════════════════════════════════════════════════════════════
 
+/// Common HTTP status code constants.
 pub mod status {
+    /// 200 OK
     pub const OK: u16 = 200;
+    /// 201 Created
     pub const CREATED: u16 = 201;
+    /// 202 Accepted
     pub const ACCEPTED: u16 = 202;
+    /// 204 No Content
     pub const NO_CONTENT: u16 = 204;
+    /// 400 Bad Request
     pub const BAD_REQUEST: u16 = 400;
+    /// 401 Unauthorized
     pub const UNAUTHORIZED: u16 = 401;
+    /// 403 Forbidden
     pub const FORBIDDEN: u16 = 403;
+    /// 404 Not Found
     pub const NOT_FOUND: u16 = 404;
+    /// 405 Method Not Allowed
     pub const METHOD_NOT_ALLOWED: u16 = 405;
+    /// 409 Conflict
     pub const CONFLICT: u16 = 409;
+    /// 422 Unprocessable Entity
     pub const UNPROCESSABLE_ENTITY: u16 = 422;
+    /// 500 Internal Server Error
     pub const INTERNAL_SERVER_ERROR: u16 = 500;
+    /// 502 Bad Gateway
     pub const BAD_GATEWAY: u16 = 502;
+    /// 503 Service Unavailable
     pub const SERVICE_UNAVAILABLE: u16 = 503;
 }
 
@@ -412,8 +605,9 @@ pub mod status {
 //  Result Extension Trait
 // ═══════════════════════════════════════════════════════════════
 
-/// Extension trait to convert results to HTTP responses
+/// Extension trait to convert results to HTTP responses.
 pub trait IntoHttpResponse {
+    /// Convert to an HTTP response.
     fn into_http_response(self) -> HttpResult<HttpResponse>;
 }
 
@@ -430,39 +624,60 @@ impl<T: Serialize> IntoHttpResponse for Result<T, HttpError> {
 //  Simple Router Implementation
 // ═══════════════════════════════════════════════════════════════
 
+/// Handler function type for router.
 pub type HandlerFn = fn(HttpRequest) -> HttpResult<HttpResponse>;
 
+/// Simple HTTP router with pattern matching.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let mut router = Router::new();
+/// router.get("/api/status", status_handler);
+/// router.post("/api/users", create_user_handler);
+///
+/// let response = router.handle(request);
+/// ```
 pub struct Router {
     routes: HashMap<(HttpMethod, String), HandlerFn>,
 }
 
 impl Router {
+    /// Create a new empty router.
     pub fn new() -> Self {
         Self {
             routes: HashMap::new(),
         }
     }
 
+    /// Add a route with a specific method.
     pub fn add_route(&mut self, method: HttpMethod, path: impl Into<String>, handler: HandlerFn) {
         self.routes.insert((method, path.into()), handler);
     }
 
+    /// Add a GET route.
     pub fn get(&mut self, path: impl Into<String>, handler: HandlerFn) {
         self.add_route(HttpMethod::GET, path, handler);
     }
 
+    /// Add a POST route.
     pub fn post(&mut self, path: impl Into<String>, handler: HandlerFn) {
         self.add_route(HttpMethod::POST, path, handler);
     }
 
+    /// Add a PUT route.
     pub fn put(&mut self, path: impl Into<String>, handler: HandlerFn) {
         self.add_route(HttpMethod::PUT, path, handler);
     }
 
+    /// Add a DELETE route.
     pub fn delete(&mut self, path: impl Into<String>, handler: HandlerFn) {
         self.add_route(HttpMethod::DELETE, path, handler);
     }
 
+    /// Handle an incoming request.
+    ///
+    /// Automatically handles CORS preflight (OPTIONS) requests.
     pub fn handle(&self, request: HttpRequest) -> HttpResponse {
         // Handle CORS preflight
         if request.method.to_uppercase() == "OPTIONS" {

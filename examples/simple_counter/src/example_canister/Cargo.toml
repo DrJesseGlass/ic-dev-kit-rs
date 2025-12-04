@@ -11,7 +11,7 @@ candid = "0.10"
 ic-cdk = "0.18.7"
 ic-stable-structures = "0.7.2"
 serde = { version = "1.0", features = ["derive"] }
-
+canistergeek_ic_rust = "0.4.4"
 # Your ic-dev-kit-rs with all features
 ic-dev-kit-rs = { path = "../../../../../ic-dev-kit-rs", features = ["telemetry", "storage"] }
 

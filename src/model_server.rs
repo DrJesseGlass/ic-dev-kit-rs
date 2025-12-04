@@ -1,7 +1,27 @@
-//! Generic model server
+//! Generic model server for LLM inference.
 //!
-//! This module requires both 'text-generation' and 'storage' features to be enabled.
-//! The ModelServer uses text generation for LLM inference and storage to load model weights.
+//! Provides a ready-to-use server that combines storage (for model weights)
+//! with text generation. Requires both `text-generation` and `storage` features.
+//!
+//! # Quick Start
+//!
+//! ```rust,ignore
+//! use ic_dev_kit_rs::model_server::ModelServer;
+//! use std::cell::RefCell;
+//!
+//! thread_local! {
+//!     static SERVER: ModelServer<MyLlm> = ModelServer::new();
+//! }
+//!
+//! // Use the macro to generate all endpoints
+//! ic_dev_kit_rs::generate_model_endpoints!(
+//!     server: SERVER,
+//!     registry: REGISTRIES,
+//!     weights_key: "model_weights",
+//!     tokenizer_key: "tokenizer",
+//!     get_tokenizer: |model| Box::new(model.get_tokenizer())
+//! );
+//! ```
 
 #![cfg(all(feature = "text-generation", feature = "storage"))]
 
@@ -12,12 +32,20 @@ use crate::candle::*;
 use crate::text_generation::*;
 use crate::storage::StorageRegistry;
 
+/// Generic model server for LLM inference.
+///
+/// Manages model loading from storage and inference. Thread-safe for IC.
+///
+/// # Type Parameters
+///
+/// * `M` - The model type (must implement [`AutoregressiveModel`])
 pub struct ModelServer<M: AutoregressiveModel> {
     model: RefCell<Option<M>>,
     tokenizer: RefCell<Option<Box<dyn TokenizerHandle>>>,
 }
 
 impl<M: AutoregressiveModel> ModelServer<M> {
+    /// Create a new uninitialized model server.
     pub const fn new() -> Self {
         Self {
             model: RefCell::new(None),
@@ -25,6 +53,27 @@ impl<M: AutoregressiveModel> ModelServer<M> {
         }
     }
 
+    /// Set up the model from storage.
+    ///
+    /// Loads model weights and tokenizer from the storage registry.
+    ///
+    /// # Arguments
+    ///
+    /// * `registry` - The storage registry containing model data
+    /// * `weights_key` - Storage key for model weights
+    /// * `tokenizer_key` - Storage key for tokenizer data
+    /// * `get_tokenizer` - Function to extract tokenizer from loaded model
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// server.setup_from_storage(
+    ///     &registry,
+    ///     "model_weights",
+    ///     "tokenizer",
+    ///     |model| Box::new(model.tokenizer().clone())
+    /// )?;
+    /// ```
     pub fn setup_from_storage<R: StorageRegistry>(
         &self,
         registry: &RefCell<R>,
@@ -47,6 +96,16 @@ impl<M: AutoregressiveModel> ModelServer<M> {
         Ok(())
     }
 
+    /// Generate text from a prompt.
+    ///
+    /// # Arguments
+    ///
+    /// * `prompt` - The input prompt
+    /// * `config` - Generation configuration
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model is not initialized.
     pub fn generate(
         &self,
         prompt: String,
@@ -61,44 +120,65 @@ impl<M: AutoregressiveModel> ModelServer<M> {
         generate_autoregressive(model, prompt, tokenizer.as_ref(), config)
     }
 
+    /// Reset the model's generation state.
+    ///
+    /// Clears KV cache and other generation state.
     pub fn reset(&self) -> Result<(), String> {
         let mut model = self.model.borrow_mut();
         model.as_mut().ok_or("Model not initialized")?.reset();
         Ok(())
     }
 
+    /// Check if the model is loaded.
     pub fn is_loaded(&self) -> bool {
         self.model.borrow().is_some()
     }
 
+    /// Get the current token count (for multi-turn generation).
     pub fn token_count(&self) -> usize {
         self.model.borrow().as_ref().map(|m| m.generated_token_count()).unwrap_or(0)
     }
 
+    /// Get model metadata.
     pub fn metadata(&self) -> Option<ModelMetadata> {
         self.model.borrow().as_ref().map(|m| m.metadata())
     }
 }
 
-// Response types
+// ═══════════════════════════════════════════════════════════════
+//  Response Types
+// ═══════════════════════════════════════════════════════════════
+
+/// Simple result type for endpoints with no return value.
 #[derive(CandidType, Deserialize)]
 pub enum EmptyResult {
+    /// Success.
     Ok,
+    /// Error with message.
     Err(String),
 }
 
+/// Request for inference.
 #[derive(CandidType, Deserialize)]
 pub struct InferenceRequest {
+    /// The input prompt.
     pub prompt: String,
+    /// Optional generation config (uses defaults if None).
     pub config: Option<GenerationConfig>,
 }
 
+/// Response from inference.
 #[derive(CandidType, Deserialize)]
 pub struct InferenceResponse {
+    /// The generated text.
     pub generated_text: String,
+    /// Number of tokens generated.
     pub tokens_generated: usize,
+    /// IC instructions used.
     pub instructions_used: u64,
+    /// Whether generation succeeded.
     pub success: bool,
+    /// Error message if failed.
     pub error: Option<String>,
 }
 
@@ -114,16 +194,54 @@ impl From<GenerationResponse> for InferenceResponse {
     }
 }
 
+/// Model information for status queries.
 #[derive(CandidType, Deserialize)]
 pub struct ModelInfo {
+    /// Whether the model is loaded.
     pub loaded: bool,
+    /// Current token count in context.
     pub current_tokens: usize,
+    /// Model metadata (if loaded).
     pub metadata: Option<ModelMetadata>,
 }
 
-/// Macro to generate all IC endpoints for a model server
+// ═══════════════════════════════════════════════════════════════
+//  Macro for Generating Endpoints
+// ═══════════════════════════════════════════════════════════════
+
+/// Generate all IC endpoints for a model server.
 ///
-/// This generates: setup_model, generate, reset_generation, is_model_loaded, get_model_info
+/// This macro creates the following endpoints:
+/// - `setup_model` - Load model from storage (admin only)
+/// - `generate` - Run inference (public)
+/// - `reset_generation` - Reset model state (admin only)
+/// - `is_model_loaded` - Check if model is ready (public)
+/// - `get_model_info` - Get model information (public)
+///
+/// # Arguments
+///
+/// * `server` - The thread-local ModelServer instance
+/// * `registry` - The storage registry
+/// * `weights_key` - Storage key for model weights
+/// * `tokenizer_key` - Storage key for tokenizer
+/// * `get_tokenizer` - Function to extract tokenizer from model
+///
+/// # Example
+///
+/// ```rust,ignore
+/// thread_local! {
+///     static SERVER: ModelServer<MyLlm> = ModelServer::new();
+///     static REGISTRIES: RefCell<StableBTreeMap<...>> = ...;
+/// }
+///
+/// ic_dev_kit_rs::generate_model_endpoints!(
+///     server: SERVER,
+///     registry: REGISTRIES,
+///     weights_key: "model_weights",
+///     tokenizer_key: "tokenizer",
+///     get_tokenizer: |model| Box::new(model.get_tokenizer())
+/// );
+/// ```
 #[macro_export]
 macro_rules! generate_model_endpoints {
     (

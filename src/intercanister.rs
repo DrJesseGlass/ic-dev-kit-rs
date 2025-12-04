@@ -1,9 +1,28 @@
-// Intercanister call wrapper for ic-cdk 0.19
-//
-// Note: ic-cdk 0.19 is in a transitional state where the types have moved
-// to ic_cdk::call but the functions are still in ic_cdk::api::call (deprecated).
-// The replacement API mentioned in warnings doesn't actually exist yet.
-// Using #[allow(deprecated)] is the correct approach until the API is fully updated.
+//! Inter-canister call wrappers with automatic logging.
+//!
+//! Provides convenient wrappers around IC inter-canister calls with:
+//! - Automatic logging of call start/success/failure
+//! - Consistent error formatting
+//! - Support for calls with cycles
+//! - One-way notifications
+//!
+//! # Example
+//!
+//! ```rust,ignore
+//! use ic_dev_kit_rs::intercanister;
+//! use candid::Principal;
+//!
+//! #[ic_cdk::update]
+//! async fn call_other(canister_id: Principal) -> Result<String, String> {
+//!     intercanister::call(canister_id, "get_data", ()).await
+//! }
+//! ```
+//!
+//! # Note on ic-cdk 0.19
+//!
+//! The ic-cdk 0.19 crate is in a transitional state where types have moved
+//! to `ic_cdk::call` but functions are still in `ic_cdk::api::call` (deprecated).
+//! This module uses `#[allow(deprecated)]` until the API is fully updated.
 
 use candid::{CandidType, Principal};
 use serde::de::DeserializeOwned;
@@ -12,7 +31,28 @@ use serde::de::DeserializeOwned;
 //  Core Call Functions
 // ═══════════════════════════════════════════════════════════════
 
-/// Make an intercanister call with automatic logging
+/// Make an inter-canister call with automatic logging.
+///
+/// # Type Parameters
+///
+/// * `T` - The argument type (must implement `ArgumentEncoder`)
+/// * `R` - The return type (must implement `DeserializeOwned + CandidType`)
+///
+/// # Arguments
+///
+/// * `canister_id` - The target canister's principal
+/// * `method` - The method name to call
+/// * `args` - The arguments to pass
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let result: MyResponse = intercanister::call(
+///     canister_id,
+///     "my_method",
+///     (arg1, arg2)
+/// ).await?;
+/// ```
 #[allow(deprecated)]
 pub async fn call<T, R>(canister_id: Principal, method: &str, args: T) -> Result<R, String>
 where
@@ -33,7 +73,25 @@ where
         .map_err(|e| format_call_error(canister_id, method, e))
 }
 
-/// Make an intercanister call with payment (cycles)
+/// Make an inter-canister call with cycles attached.
+///
+/// # Arguments
+///
+/// * `canister_id` - The target canister's principal
+/// * `method` - The method name to call
+/// * `args` - The arguments to pass
+/// * `cycles` - The number of cycles to attach
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let result: MyResponse = intercanister::call_with_payment(
+///     canister_id,
+///     "paid_method",
+///     (arg1,),
+///     1_000_000  // 1M cycles
+/// ).await?;
+/// ```
 #[allow(deprecated)]
 pub async fn call_with_payment<T, R>(
     canister_id: Principal,
@@ -60,7 +118,26 @@ where
         .map_err(|e| format_call_error(canister_id, method, e))
 }
 
-/// Make an intercanister call without waiting for response
+/// Make a one-way inter-canister call (fire-and-forget).
+///
+/// This sends a notification to another canister without waiting for a response.
+/// Use this when you don't need to know if the call succeeded.
+///
+/// # Arguments
+///
+/// * `canister_id` - The target canister's principal
+/// * `method` - The method name to call
+/// * `args` - The arguments to pass
+///
+/// # Example
+///
+/// ```rust,ignore
+/// intercanister::call_one_way(
+///     logger_canister,
+///     "log_event",
+///     ("user_action", user_id)
+/// )?;
+/// ```
 #[allow(deprecated)]
 pub fn call_one_way<T>(canister_id: Principal, method: &str, args: T) -> Result<(), String>
 where
@@ -81,6 +158,20 @@ where
             Err(err_msg)
         }
     }
+}
+
+/// Convenience function to call a method that takes no arguments.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let count: u64 = intercanister::call_no_args(canister_id, "get_count").await?;
+/// ```
+pub async fn call_no_args<R>(canister_id: Principal, method: &str) -> Result<R, String>
+where
+    R: DeserializeOwned + CandidType,
+{
+    call(canister_id, method, ()).await
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -132,14 +223,6 @@ fn format_call_error(
 
 fn log_message(msg: &str) {
     ic_cdk::println!("{}", msg);
-}
-
-/// Convenience function to call a method that takes no arguments
-pub async fn call_no_args<R>(canister_id: Principal, method: &str) -> Result<R, String>
-where
-    R: DeserializeOwned + CandidType,
-{
-    call(canister_id, method, ()).await
 }
 
 #[cfg(test)]

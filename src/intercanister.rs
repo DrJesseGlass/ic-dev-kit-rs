@@ -17,14 +17,9 @@
 //!     intercanister::call(canister_id, "get_data", ()).await
 //! }
 //! ```
-//!
-//! # Note on ic-cdk 0.19
-//!
-//! The ic-cdk 0.19 crate is in a transitional state where types have moved
-//! to `ic_cdk::call` but functions are still in `ic_cdk::api::call` (deprecated).
-//! This module uses `#[allow(deprecated)]` until the API is fully updated.
 
 use candid::{CandidType, Principal};
+use ic_cdk::call::{Call, CallFailed};
 use serde::de::DeserializeOwned;
 
 // ═══════════════════════════════════════════════════════════════
@@ -53,7 +48,6 @@ use serde::de::DeserializeOwned;
 ///     (arg1, arg2)
 /// ).await?;
 /// ```
-#[allow(deprecated)]
 pub async fn call<T, R>(canister_id: Principal, method: &str, args: T) -> Result<R, String>
 where
     T: candid::utils::ArgumentEncoder,
@@ -61,7 +55,9 @@ where
 {
     log_call_start(canister_id, method);
 
-    let result: Result<(R,), _> = ic_cdk::api::call::call(canister_id, method, args).await;
+    let result = Call::unbounded_wait(canister_id, method)
+        .with_args(&args)
+        .await;
 
     match &result {
         Ok(_) => log_call_success(canister_id, method),
@@ -69,8 +65,13 @@ where
     }
 
     result
-        .map(|r| r.0)
-        .map_err(|e| format_call_error(canister_id, method, e))
+        .map_err(|e| format_call_error(canister_id, method, &e))
+        .and_then(|response| {
+            response
+                .candid::<(R,)>()
+                .map(|(r,)| r)
+                .map_err(|e| format!("Failed to decode response: {}", e))
+        })
 }
 
 /// Make an inter-canister call with cycles attached.
@@ -92,7 +93,6 @@ where
 ///     1_000_000  // 1M cycles
 /// ).await?;
 /// ```
-#[allow(deprecated)]
 pub async fn call_with_payment<T, R>(
     canister_id: Principal,
     method: &str,
@@ -105,8 +105,10 @@ where
 {
     log_call_start_with_cycles(canister_id, method, cycles);
 
-    let result: Result<(R,), _> =
-        ic_cdk::api::call::call_with_payment128(canister_id, method, args, cycles).await;
+    let result = Call::unbounded_wait(canister_id, method)
+        .with_args(&args)
+        .with_cycles(cycles)
+        .await;
 
     match &result {
         Ok(_) => log_call_success(canister_id, method),
@@ -114,8 +116,13 @@ where
     }
 
     result
-        .map(|r| r.0)
-        .map_err(|e| format_call_error(canister_id, method, e))
+        .map_err(|e| format_call_error(canister_id, method, &e))
+        .and_then(|response| {
+            response
+                .candid::<(R,)>()
+                .map(|(r,)| r)
+                .map_err(|e| format!("Failed to decode response: {}", e))
+        })
 }
 
 /// Make a one-way inter-canister call (fire-and-forget).
@@ -138,14 +145,15 @@ where
 ///     ("user_action", user_id)
 /// )?;
 /// ```
-#[allow(deprecated)]
 pub fn call_one_way<T>(canister_id: Principal, method: &str, args: T) -> Result<(), String>
 where
     T: candid::utils::ArgumentEncoder,
 {
     log_call_start(canister_id, method);
 
-    let result: Result<(), _> = ic_cdk::api::call::notify(canister_id, method, args);
+    let result = Call::unbounded_wait(canister_id, method)
+        .with_args(&args)
+        .oneway();
 
     match &result {
         Ok(_) => {
@@ -153,7 +161,7 @@ where
             Ok(())
         }
         Err(e) => {
-            let err_msg = format!("Notify failed: {:?}", e);
+            let err_msg = format!("Oneway call to {}.{} failed: {}", canister_id, method, e);
             log_message(&err_msg);
             Err(err_msg)
         }
@@ -193,27 +201,17 @@ fn log_call_success(canister_id: Principal, method: &str) {
     log_message(&format!("✓ Call {}.{} succeeded", canister_id, method));
 }
 
-#[allow(deprecated)]
-fn log_call_error(
-    canister_id: Principal,
-    method: &str,
-    error: &(ic_cdk::api::call::RejectionCode, String),
-) {
+fn log_call_error(canister_id: Principal, method: &str, error: &CallFailed) {
     log_message(&format!(
-        "✗ Call {}.{} failed: {:?} - {}",
-        canister_id, method, error.0, error.1
+        "✗ Call {}.{} failed: {}",
+        canister_id, method, error
     ));
 }
 
-#[allow(deprecated)]
-fn format_call_error(
-    canister_id: Principal,
-    method: &str,
-    error: (ic_cdk::api::call::RejectionCode, String),
-) -> String {
+fn format_call_error(canister_id: Principal, method: &str, error: &CallFailed) -> String {
     format!(
-        "Intercanister call to {}.{} failed: {:?} - {}",
-        canister_id, method, error.0, error.1
+        "Intercanister call to {}.{} failed: {}",
+        canister_id, method, error
     )
 }
 
@@ -228,17 +226,17 @@ fn log_message(msg: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ic_cdk::call::CallRejected;
 
     #[test]
-    #[allow(deprecated)]
     fn test_error_formatting() {
         let canister_id = Principal::anonymous();
-        let error = (
-            ic_cdk::api::call::RejectionCode::CanisterError,
+        let error = CallFailed::CallRejected(CallRejected::with_rejection(
+            5, // CanisterError
             "Test error".to_string(),
-        );
+        ));
 
-        let formatted = format_call_error(canister_id, "test_method", error);
+        let formatted = format_call_error(canister_id, "test_method", &error);
 
         assert!(formatted.contains("test_method"));
         assert!(formatted.contains("Test error"));

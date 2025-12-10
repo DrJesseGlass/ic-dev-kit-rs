@@ -68,8 +68,7 @@ where
         .map_err(|e| format_call_error(canister_id, method, &e))
         .and_then(|response| {
             response
-                .candid::<(R,)>()
-                .map(|(r,)| r)
+                .candid::<R>()
                 .map_err(|e| format!("Failed to decode response: {}", e))
         })
 }
@@ -98,8 +97,7 @@ where
         .map_err(|e| format_call_error(canister_id, method, &e))
         .and_then(|response| {
             response
-                .candid::<(R,)>()
-                .map(|(r,)| r)
+                .candid::<R>()
                 .map_err(|e| format!("Failed to decode response: {}", e))
         })
 }
@@ -149,8 +147,7 @@ where
         .map_err(|e| format_call_error(canister_id, method, &e))
         .and_then(|response| {
             response
-                .candid::<(R,)>()
-                .map(|(r,)| r)
+                .candid::<R>()
                 .map_err(|e| format!("Failed to decode response: {}", e))
         })
 }

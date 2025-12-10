@@ -74,6 +74,36 @@ where
         })
 }
 
+/// Make a composite query call (query calling another query).
+///
+/// The caller must be marked with `#[query(composite = true)]`.
+/// The target method must be a query method.
+pub async fn query_call<T, R>(canister_id: Principal, method: &str, args: T) -> Result<R, String>
+where
+    T: candid::utils::ArgumentEncoder,
+    R: DeserializeOwned + CandidType,
+{
+    log_call_start(canister_id, method);
+
+    let result = Call::bounded_wait(canister_id, method)
+        .with_args(&args)
+        .await;
+
+    match &result {
+        Ok(_) => log_call_success(canister_id, method),
+        Err(e) => log_call_error(canister_id, method, e),
+    }
+
+    result
+        .map_err(|e| format_call_error(canister_id, method, &e))
+        .and_then(|response| {
+            response
+                .candid::<(R,)>()
+                .map(|(r,)| r)
+                .map_err(|e| format!("Failed to decode response: {}", e))
+        })
+}
+
 /// Make an inter-canister call with cycles attached.
 ///
 /// # Arguments

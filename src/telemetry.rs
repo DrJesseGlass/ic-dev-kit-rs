@@ -281,7 +281,7 @@ pub fn collect_metrics() {
 }
 
 /// Get Canistergeek information.
-pub fn get_information(request: GetInformationRequest) -> GetInformationResponse<'static> {
+pub fn get_information(request: GetInformationRequest) -> GetInformationResponse {
     canistergeek_ic_rust::get_information(request)
 }
 
@@ -327,7 +327,7 @@ pub fn log_debug(message: impl Into<String>) {
 }
 
 /// Get canister log entries.
-pub fn get_canister_log(request: CanisterLogRequest) -> Option<CanisterLogResponse<'static>> {
+pub fn get_canister_log(request: CanisterLogRequest) -> Option<CanisterLogResponse> {
     canistergeek_ic_rust::logger::get_canister_log(Some(request))
 }
 
@@ -399,7 +399,7 @@ macro_rules! export_telemetry_endpoints {
         #[ic_cdk::query(name = "getCanistergeekInformation", guard = "is_monitoring_authorized")]
         fn get_canistergeek_information(
             request: canistergeek_ic_rust::api_type::GetInformationRequest
-        ) -> canistergeek_ic_rust::api_type::GetInformationResponse<'static> {
+        ) -> canistergeek_ic_rust::api_type::GetInformationResponse {
             $crate::telemetry::get_information(request)
         }
 
@@ -413,7 +413,7 @@ macro_rules! export_telemetry_endpoints {
         #[ic_cdk::query(name = "getCanisterLog", guard = "is_monitoring_authorized")]
         fn get_canister_log_messages(
             request: canistergeek_ic_rust::api_type::CanisterLogRequest
-        ) -> Option<canistergeek_ic_rust::api_type::CanisterLogResponse<'static>> {
+        ) -> Option<canistergeek_ic_rust::api_type::CanisterLogResponse> {
             $crate::telemetry::get_canister_log(request)
         }
 

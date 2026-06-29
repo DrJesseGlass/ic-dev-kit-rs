@@ -11,8 +11,7 @@ categories = ["web-programming", "api-bindings"]
 
 [dependencies]
 # IC dependencies (keep working versions)
-#ic-cdk = "0.18.7"
-candid = "0.10.20"
+candid = "0.10.31"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -25,10 +24,10 @@ thiserror = "1.0"
 async-trait = "0.1"
 
 # Telemetry
-# doesn't support 0.4.4 ic-cdk v19 yet which has different inter canister calls
-#canistergeek_ic_rust = { version = "0.4.4", optional = true }
-canistergeek_ic_rust = { git = "https://github.com/DrJesseGlass/canistergeek_ic_rust", branch = "update/ic-cdk/19",  optional = true}
-ic-cdk = "0.19.0"
+# Upstream canistergeek_ic_rust still pins ic-cdk 0.19 (as of 0.6.0); use the
+# fork branch migrated to ic-cdk 0.20 so we don't pull a duplicate ic-cdk.
+canistergeek_ic_rust = { git = "https://github.com/DrJesseGlass/canistergeek_ic_rust", branch = "update/ic-cdk/20",  optional = true}
+ic-cdk = "0.20.2"
 
 # Storage - optional, behind feature flag
 ic-stable-structures = { version = "0.7.2", optional = true }

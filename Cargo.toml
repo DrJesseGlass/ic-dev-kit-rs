@@ -25,20 +25,17 @@ async-trait = "0.1"
 
 # Telemetry
 # Upstream canistergeek_ic_rust still pins ic-cdk 0.19 (as of 0.6.0); use the
-# fork branch migrated to ic-cdk 0.20 so we don't pull a duplicate ic-cdk.
-canistergeek_ic_rust = { git = "https://github.com/DrJesseGlass/canistergeek_ic_rust", branch = "update/ic-cdk/20",  optional = true}
+# fork migrated to ic-cdk 0.20, pinned to an immutable tag for reproducibility.
+canistergeek_ic_rust = { git = "https://github.com/DrJesseGlass/canistergeek_ic_rust", tag = "v0.6.0", optional = true }
 ic-cdk = "0.20.2"
 
 # Storage - optional, behind feature flag
 ic-stable-structures = { version = "0.7.2", optional = true }
 
-# Candle - optional, behind feature flag
-#candle-core = { git = "https://github.com/huggingface/candle", tag = "0.9.2-alpha.1", default-features = false, optional = true }
-#candle-nn = { git = "https://github.com/huggingface/candle", tag = "0.9.2-alpha.1", default-features = false, optional = true }
-#candle-transformers = { git = "https://github.com/huggingface/candle", tag = "0.9.2-alpha.1", default-features = false, optional = true }
-candle-core = { git = "https://github.com/huggingface/candle", default-features = false, optional = true }
-candle-nn = { git = "https://github.com/huggingface/candle", default-features = false, optional = true }
-candle-transformers = { git = "https://github.com/huggingface/candle", default-features = false, optional = true }
+# Candle - optional, behind feature flag (published crates.io releases)
+candle-core = { version = "0.11", default-features = false, optional = true }
+candle-nn = { version = "0.11", default-features = false, optional = true }
+candle-transformers = { version = "0.11", default-features = false, optional = true }
 tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"], optional = true }
 
 [dev-dependencies]

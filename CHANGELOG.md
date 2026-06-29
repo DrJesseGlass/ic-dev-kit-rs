@@ -5,9 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-06-29
 
-Initial release.
+Initial release. Built against `ic-cdk` 0.20, `candid` 0.10, `ic-stable-structures`
+0.7, and `candle` 0.11. The optional `telemetry` feature uses the
+`canistergeek_ic_rust` fork (tag `v0.6.0`) migrated to `ic-cdk` 0.20; all git
+dependencies are pinned to immutable refs / published versions for reproducibility.
 
 ### Added
 

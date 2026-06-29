@@ -4,17 +4,17 @@ Rust toolkit for Internet Computer canister development. Standardizes common pat
 
 ## Installation
 
-Add to your `Cargo.toml`:
+Released via git tags (not yet on crates.io). Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ic-dev-kit-rs = "0.1.0"
+ic-dev-kit-rs = { git = "https://github.com/DrJesseGlass/ic-dev-kit-rs", tag = "v0.1.0" }
 
 # Enable optional features (most common)
-ic-dev-kit-rs = { version = "0.1.0", features = ["storage", "telemetry"] }
+ic-dev-kit-rs = { git = "https://github.com/DrJesseGlass/ic-dev-kit-rs", tag = "v0.1.0", features = ["storage", "telemetry"] }
 
 # ML features (includes storage automatically)
-ic-dev-kit-rs = { version = "0.1.0", features = ["text-generation"] }
+ic-dev-kit-rs = { git = "https://github.com/DrJesseGlass/ic-dev-kit-rs", tag = "v0.1.0", features = ["text-generation"] }
 ```
 
 ## Features

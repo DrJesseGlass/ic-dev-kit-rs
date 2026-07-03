@@ -108,9 +108,11 @@ pub fn total_buffered_bytes(owner: Principal) -> usize {
     buffer_size(owner) + parallel_buffer_size(owner)
 }
 
-fn check_capacity(owner: Principal, incoming: usize) -> Result<(), String> {
+/// Enforce the per-owner cap given the owner's current usage and the bytes
+/// about to be added. Callers pass `current` excluding anything the write
+/// replaces.
+fn check_capacity(current: usize, incoming: usize) -> Result<(), String> {
     if let Some(limit) = max_bytes_per_owner() {
-        let current = total_buffered_bytes(owner);
         if current.saturating_add(incoming) > limit {
             return Err(format!(
                 "Upload buffer limit exceeded: {} buffered + {} incoming > {} byte cap",
@@ -134,13 +136,14 @@ fn check_capacity(owner: Principal, incoming: usize) -> Result<(), String> {
 /// The new buffer size in bytes, or an error if the per-owner cap would be
 /// exceeded.
 pub fn append_chunk(owner: Principal, chunk: Vec<u8>) -> Result<usize, String> {
-    check_capacity(owner, chunk.len())?;
-    Ok(BUFFERS.with(|buffers| {
+    let parallel_bytes = parallel_buffer_size(owner);
+    BUFFERS.with(|buffers| {
         let mut buffers = buffers.borrow_mut();
         let buffer = buffers.entry(owner).or_default();
+        check_capacity(buffer.len() + parallel_bytes, chunk.len())?;
         buffer.extend(chunk);
-        buffer.len()
-    }))
+        Ok(buffer.len())
+    })
 }
 
 /// Get the current size of the owner's sequential buffer in bytes.
@@ -168,17 +171,8 @@ pub fn get_buffer_data(owner: Principal) -> Vec<u8> {
 ///
 /// Returns an error if the data alone exceeds the per-owner cap.
 pub fn load_to_buffer(owner: Principal, data: Vec<u8>) -> Result<(), String> {
-    if let Some(limit) = max_bytes_per_owner() {
-        let other = parallel_buffer_size(owner);
-        if other.saturating_add(data.len()) > limit {
-            return Err(format!(
-                "Upload buffer limit exceeded: {} parallel + {} incoming > {} byte cap",
-                other,
-                data.len(),
-                limit
-            ));
-        }
-    }
+    // Replaces the sequential buffer, so only parallel bytes count as current.
+    check_capacity(parallel_buffer_size(owner), data.len())?;
     BUFFERS.with(|buffers| {
         buffers.borrow_mut().insert(owner, data);
     });
@@ -210,21 +204,20 @@ pub fn append_parallel_chunk(
     chunk_id: u32,
     chunk: Vec<u8>,
 ) -> Result<usize, String> {
-    // A replaced chunk frees its old bytes, so only count the delta.
-    let replaced = BUFFER_MAPS.with(|maps| {
-        maps.borrow()
-            .get(&owner)
-            .and_then(|m| m.get(&chunk_id).map(Vec::len))
-            .unwrap_or(0)
-    });
-    check_capacity(owner, chunk.len().saturating_sub(replaced))?;
-
-    Ok(BUFFER_MAPS.with(|maps| {
+    let sequential_bytes = buffer_size(owner);
+    BUFFER_MAPS.with(|maps| {
         let mut maps = maps.borrow_mut();
         let map = maps.entry(owner).or_default();
+        // A replaced chunk frees its old bytes, so only count the delta.
+        let replaced = map.get(&chunk_id).map(Vec::len).unwrap_or(0);
+        let parallel_bytes: usize = map.values().map(Vec::len).sum();
+        check_capacity(
+            sequential_bytes + parallel_bytes,
+            chunk.len().saturating_sub(replaced),
+        )?;
         map.insert(chunk_id, chunk);
-        map.len()
-    }))
+        Ok(map.len())
+    })
 }
 
 /// Get the number of chunks in the owner's parallel buffer.
@@ -296,31 +289,26 @@ pub fn missing_chunks(owner: Principal, expected_count: u32) -> Vec<u32> {
 ///
 /// Returns an error if the owner's parallel buffer is empty.
 pub fn consolidate_parallel_chunks(owner: Principal) -> Result<usize, String> {
-    let chunk_data = BUFFER_MAPS.with(|maps| {
-        let mut maps = maps.borrow_mut();
-        let Some(mut map) = maps.remove(&owner) else {
-            return Vec::new();
-        };
-
-        let mut sorted_ids: Vec<u32> = map.keys().copied().collect();
-        sorted_ids.sort();
-
-        let mut consolidated = Vec::new();
-        for chunk_id in sorted_ids {
-            if let Some(chunk) = map.remove(&chunk_id) {
-                consolidated.extend(chunk);
-            }
-        }
-        consolidated
+    let mut pairs: Vec<(u32, Vec<u8>)> = BUFFER_MAPS.with(|maps| {
+        maps.borrow_mut()
+            .remove(&owner)
+            .map(|map| map.into_iter().collect())
+            .unwrap_or_default()
     });
 
-    if chunk_data.is_empty() {
+    let total_size: usize = pairs.iter().map(|(_, chunk)| chunk.len()).sum();
+    if total_size == 0 {
         return Err("No parallel chunks to consolidate".to_string());
     }
 
-    let total_size = chunk_data.len();
+    pairs.sort_unstable_by_key(|(id, _)| *id);
+    let mut consolidated = Vec::with_capacity(total_size);
+    for (_, chunk) in pairs {
+        consolidated.extend(chunk);
+    }
+
     BUFFERS.with(|buffers| {
-        buffers.borrow_mut().insert(owner, chunk_data);
+        buffers.borrow_mut().insert(owner, consolidated);
     });
 
     Ok(total_size)
@@ -382,11 +370,20 @@ pub fn remove_parallel_chunk(owner: Principal, chunk_id: u32) -> bool {
 
 /// Get detailed status of the owner's buffers.
 pub fn storage_status(owner: Principal) -> StorageStatus {
+    let (parallel_chunk_count, parallel_buffer_size, parallel_chunk_ids) =
+        BUFFER_MAPS.with(|maps| {
+            maps.borrow().get(&owner).map_or((0, 0, Vec::new()), |map| {
+                let mut ids: Vec<u32> = map.keys().copied().collect();
+                ids.sort_unstable();
+                (map.len(), map.values().map(Vec::len).sum(), ids)
+            })
+        });
+
     StorageStatus {
         buffer_size: buffer_size(owner),
-        parallel_chunk_count: parallel_chunk_count(owner),
-        parallel_buffer_size: parallel_buffer_size(owner),
-        parallel_chunk_ids: parallel_chunk_ids(owner),
+        parallel_chunk_count,
+        parallel_buffer_size,
+        parallel_chunk_ids,
     }
 }
 

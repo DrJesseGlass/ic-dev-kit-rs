@@ -62,9 +62,6 @@ pub enum AuthError {
     /// The provided principal text is invalid.
     #[error("Invalid principal")]
     InvalidPrincipal,
-    /// The auth system has not been initialized.
-    #[error("Auth not initialized - call auth::init() first")]
-    NotInitialized,
 }
 
 /// Result type for authentication operations.
@@ -224,10 +221,8 @@ pub fn init_from_saved(saved_bytes: Option<Vec<u8>>) {
     init_with_principals(principals);
 }
 
-/// Whether the auth system has been initialized.
-pub fn is_initialized() -> bool {
-    AUTH.with(|a| a.borrow().is_some())
-}
+/// Error returned by the public auth functions when [`init`] was never called.
+const NOT_INITIALIZED_ERR: &str = "Auth not initialized - call auth::init() first";
 
 /// Helper to work with the auth instance without panicking when
 /// uninitialized. Guards built on this reject calls instead of trapping.
@@ -239,7 +234,7 @@ where
         a.borrow()
             .as_ref()
             .map(f)
-            .ok_or_else(|| AuthError::NotInitialized.to_string())
+            .ok_or_else(|| NOT_INITIALIZED_ERR.to_string())
     })
 }
 
@@ -261,10 +256,8 @@ where
 /// }
 /// ```
 pub fn is_authorized() -> Result<(), String> {
-    with_auth(|auth| {
-        auth.check_authorized()
-            .map_err(|e| format!("Authorization failed: {}", e))
-    })?
+    with_auth(|auth| auth.check_authorized())?
+        .map_err(|e| format!("Authorization failed: {}", e))
 }
 
 /// Alias for [`is_authorized`] - check if current caller is authorized.

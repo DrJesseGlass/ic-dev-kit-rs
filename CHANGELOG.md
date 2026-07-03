@@ -32,8 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AuthStorage::with_initial_principal`. `save_to_storage`/`load_from_storage`
   are gone — upgrade persistence remains via `save_to_bytes`/`init_from_saved`.
 - **auth** - Guard and management functions no longer trap when auth was never
-  initialized; they return an error instead (`AuthError::NotInitialized`).
-  Removed unused `AuthError::StorageError`/`SerializationError` variants.
+  initialized; they return an error instead. Removed unused
+  `AuthError::StorageError`/`SerializationError` variants.
 - **telemetry** - `export_telemetry_endpoints!` is now self-contained: the
   monitoring-admin endpoints are guarded by the new
   `telemetry::is_monitoring_admin` (controllers always allowed, plus `auth`

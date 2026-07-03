@@ -4,7 +4,7 @@
 //!
 //! # Quick Start
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use ic_dev_kit_rs::http::{self, HttpRequest, HttpResponse};
 //!
 //! #[ic_cdk::query]
@@ -35,6 +35,7 @@
 //! let response = router.handle(request);
 //! ```
 
+use candid::CandidType;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
@@ -180,7 +181,7 @@ pub type HttpResult<T> = Result<T, HttpError>;
 /// HTTP request structure (IC-compatible).
 ///
 /// This matches the format expected by the IC HTTP gateway.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, CandidType, Serialize, Deserialize)]
 pub struct HttpRequest {
     /// HTTP method (GET, POST, etc.)
     pub method: String,
@@ -195,7 +196,7 @@ pub struct HttpRequest {
 /// HTTP response structure (IC-compatible).
 ///
 /// This matches the format expected by the IC HTTP gateway.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, CandidType, Serialize, Deserialize)]
 pub struct HttpResponse {
     /// HTTP status code (200, 404, etc.)
     pub status_code: u16,

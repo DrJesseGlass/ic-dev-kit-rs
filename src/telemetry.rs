@@ -191,15 +191,16 @@ pub fn init_from_saved(
 //  Helper Functions
 // ═══════════════════════════════════════════════════════════════
 
+/// Run `f` against the monitoring auth, lazily initializing an empty one if
+/// [`init`] was never called. This keeps telemetry usable standalone and
+/// guards from trapping the canister.
 fn with_monitoring_auth<R, F>(f: F) -> R
 where
     F: FnOnce(&MonitoringAuth) -> R,
 {
     MONITORING_AUTH.with(|a| {
-        let auth_ref = a.borrow();
-        let auth = auth_ref
-            .as_ref()
-            .expect("Telemetry not initialized - call telemetry::init() first");
+        let mut auth_ref = a.borrow_mut();
+        let auth = auth_ref.get_or_insert_with(MonitoringAuth::new);
         f(auth)
     })
 }
@@ -240,6 +241,26 @@ pub fn is_monitoring_authorized() -> Result<(), String> {
     }
 
     Err("Monitoring authorization failed: caller is not a controller, admin, or monitoring principal".to_string())
+}
+
+/// Guard function for telemetry *administration* endpoints (managing the
+/// monitoring allowlist).
+///
+/// Allows canister controllers always, plus admins from the [`auth`](crate::auth)
+/// module when that module has been initialized. Does not trap if auth was
+/// never initialized — controllers can still manage monitoring access.
+pub fn is_monitoring_admin() -> Result<(), String> {
+    let caller = ic_cdk::api::msg_caller();
+
+    if ic_cdk::api::is_controller(&caller) {
+        return Ok(());
+    }
+
+    if crate::auth::is_authorized().is_ok() {
+        return Ok(());
+    }
+
+    Err("Monitoring admin authorization failed: caller is not a controller or authorized admin".to_string())
 }
 
 /// Add a principal to the monitoring allowlist.
@@ -380,9 +401,15 @@ pub fn save_principals_to_bytes() -> Vec<u8> {
 /// - `getCanistergeekInformation` - Get Canistergeek metrics (guarded)
 /// - `updateCanistergeekInformation` - Update metrics (guarded)
 /// - `getCanisterLog` - Get log messages (guarded)
-/// - `authorize_monitoring` - Add monitoring principal (admin only)
-/// - `deauthorize_monitoring` - Remove monitoring principal (admin only)
+/// - `authorize_monitoring` - Add monitoring principal (controllers/admins)
+/// - `deauthorize_monitoring` - Remove monitoring principal (controllers/admins)
 /// - `get_monitoring_principals` - List monitoring principals (guarded)
+///
+/// The macro is self-contained: administration endpoints are guarded by
+/// [`telemetry::is_monitoring_admin`](crate::telemetry::is_monitoring_admin)
+/// (controllers always allowed, plus `auth` module admins when initialized),
+/// so it can be used with or without [`export_auth_endpoints!`](crate::export_auth_endpoints)
+/// and in any order.
 ///
 /// # Example
 ///
@@ -394,6 +421,10 @@ macro_rules! export_telemetry_endpoints {
     () => {
         fn is_monitoring_authorized() -> Result<(), String> {
             $crate::telemetry::is_monitoring_authorized()
+        }
+
+        fn is_monitoring_admin() -> Result<(), String> {
+            $crate::telemetry::is_monitoring_admin()
         }
 
         #[ic_cdk::query(name = "getCanistergeekInformation", guard = "is_monitoring_authorized")]
@@ -418,12 +449,12 @@ macro_rules! export_telemetry_endpoints {
         }
 
         // Keep monitoring auth endpoints in snake_case (our own API)
-        #[ic_cdk::update(guard = "is_authorized")]
+        #[ic_cdk::update(guard = "is_monitoring_admin")]
         fn authorize_monitoring(principal: candid::Principal) {
             $crate::telemetry::add_monitoring_principal(principal);
         }
 
-        #[ic_cdk::update(guard = "is_authorized")]
+        #[ic_cdk::update(guard = "is_monitoring_admin")]
         fn deauthorize_monitoring(principal: candid::Principal) {
             $crate::telemetry::remove_monitoring_principal(principal);
         }

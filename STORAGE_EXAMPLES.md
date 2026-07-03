@@ -226,8 +226,8 @@ use ic_dev_kit_rs::{large_objects, storage};
 
 #[ic_cdk::update]
 fn finalize_and_save(key: String) -> Result<String, String> {
-    // Get data from upload buffer
-    let data = large_objects::get_buffer_data();
+    // Get data from the caller's upload buffer
+    let data = large_objects::get_buffer_data(ic_cdk::api::msg_caller());
     if data.is_empty() {
         return Err("No data in buffer".to_string());
     }

@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test (native)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Unit, integration, and doc tests
+        run: cargo test --features storage,telemetry
+      - name: Check all features compile
+        run: cargo check --all-features
+
+  wasm:
+    name: Check (wasm32 canister target)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Check core + storage + telemetry on wasm
+        run: cargo check --target wasm32-unknown-unknown --features storage,telemetry
+      - name: Check example canister (exercises the export macros)
+        run: cargo check --target wasm32-unknown-unknown
+        working-directory: examples/simple_counter/src/example_canister
+      - name: Check all features on wasm
+        # The ML features pull in `getrandom`, which has no wasm32-unknown-unknown
+        # backend by default. IC canisters must select the custom backend and
+        # register an implementation (see README); CI mirrors that setup.
+        run: cargo check --target wasm32-unknown-unknown --all-features
+        env:
+          RUSTFLAGS: --cfg getrandom_backend="custom"

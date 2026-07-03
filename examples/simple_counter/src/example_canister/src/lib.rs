@@ -24,14 +24,14 @@ thread_local! {
 //  Auth Functions
 // ═══════════════════════════════════════════════════════════════
 
-// Must call auth macro first (defines is_authorized guard)
+// Defines the local `is_authorized` guard used by endpoints below
 ic_dev_kit_rs::export_auth_endpoints!();
 
 // ═══════════════════════════════════════════════════════════════
 //  Telemetry Functions
 // ═══════════════════════════════════════════════════════════════
 
-// Then telemetry macro (uses is_authorized for admin operations)
+// Self-contained; can be invoked with or without the auth macro, in any order
 ic_dev_kit_rs::export_telemetry_endpoints!();
 
 // ═══════════════════════════════════════════════════════════════

@@ -17,6 +17,13 @@ ic-dev-kit-rs = { git = "https://github.com/DrJesseGlass/ic-dev-kit-rs", tag = "
 ic-dev-kit-rs = { git = "https://github.com/DrJesseGlass/ic-dev-kit-rs", tag = "v0.1.0", features = ["text-generation"] }
 ```
 
+**Note on ML features + wasm:** the `candle`/`text-generation` features pull in
+`getrandom`, which has no default backend on `wasm32-unknown-unknown`. Canister
+projects using these features must build with
+`RUSTFLAGS='--cfg getrandom_backend="custom"'` (e.g. in `.cargo/config.toml`)
+and register a custom entropy source (IC canisters typically seed from
+`raw_rand`).
+
 ## Features
 
 | Feature | Description | Dependencies |
@@ -145,47 +152,60 @@ ic_dev_kit_rs::export_telemetry_endpoints!();
 
 ### 5. Large Object Uploads
 
+Buffers are keyed by an `owner` principal, so concurrent uploads from
+different callers are isolated from each other. Total buffered bytes per
+owner are capped (2 GiB by default, configurable via
+`large_objects::set_max_bytes_per_owner`). Buffers live on the Wasm heap —
+finalize uploads before upgrading the canister.
+
 ```rust
 use ic_dev_kit_rs::large_objects;
 
 // Sequential upload (simple, chunks must arrive in order)
 #[ic_cdk::update]
-fn upload_chunk(data: Vec<u8>) -> usize {
-    large_objects::append_chunk(data);
-    large_objects::buffer_size()
+fn upload_chunk(data: Vec<u8>) -> Result<usize, String> {
+    large_objects::append_chunk(ic_cdk::api::msg_caller(), data)
 }
 
 #[ic_cdk::update]
 fn finalize_upload() -> Vec<u8> {
-    large_objects::get_buffer_data()
+    large_objects::get_buffer_data(ic_cdk::api::msg_caller())
 }
 
 // Parallel upload (faster, chunks can arrive out of order)
 #[ic_cdk::update]
-fn upload_parallel_chunk(chunk_id: u32, data: Vec<u8>) {
-    large_objects::append_parallel_chunk(chunk_id, data);
+fn upload_parallel_chunk(chunk_id: u32, data: Vec<u8>) -> Result<usize, String> {
+    large_objects::append_parallel_chunk(ic_cdk::api::msg_caller(), chunk_id, data)
 }
 
 #[ic_cdk::query]
 fn check_upload_complete(expected_count: u32) -> bool {
-    large_objects::parallel_chunks_complete(expected_count)
+    large_objects::parallel_chunks_complete(ic_cdk::api::msg_caller(), expected_count)
 }
 
 #[ic_cdk::query]
 fn get_missing_chunks(expected_count: u32) -> Vec<u32> {
-    large_objects::missing_chunks(expected_count)
+    large_objects::missing_chunks(ic_cdk::api::msg_caller(), expected_count)
 }
 
 #[ic_cdk::update]
 fn finalize_parallel_upload() -> Result<Vec<u8>, String> {
-    large_objects::consolidate_parallel_chunks()?;
-    Ok(large_objects::get_buffer_data())
+    let owner = ic_cdk::api::msg_caller();
+    large_objects::consolidate_parallel_chunks(owner)?;
+    Ok(large_objects::get_buffer_data(owner))
 }
 
 #[ic_cdk::query]
 fn upload_status() -> String {
-    large_objects::storage_status().to_string()
+    large_objects::storage_status(ic_cdk::api::msg_caller()).to_string()
 }
+```
+
+Or generate all of the above (plus optional storage integration) with the
+macro — it passes `msg_caller()` as the owner automatically:
+
+```rust
+ic_dev_kit_rs::generate_upload_endpoints!(guard = "auth::is_authorized");
 ```
 
 ### 6. Inter-canister Calls
@@ -309,20 +329,26 @@ fn post_upgrade() {
 
 ### `large_objects`
 
+All functions take an `owner: Principal` as their first argument (use
+`ic_cdk::api::msg_caller()` in endpoints); each owner gets isolated buffers.
+
 | Function | Description |
 |----------|-------------|
-| `append_chunk(Vec<u8>)` | Add to sequential buffer |
-| `buffer_size()` | Get sequential buffer size |
-| `get_buffer_data()` | Get and clear sequential buffer |
-| `clear_buffer()` | Clear sequential buffer |
-| `append_parallel_chunk(u32, Vec<u8>)` | Add chunk with ID |
-| `parallel_chunk_count()` | Get parallel chunk count |
-| `parallel_chunks_complete(u32)` | Check all chunks received |
-| `missing_chunks(u32)` | Get missing chunk IDs |
-| `consolidate_parallel_chunks()` | Merge parallel to sequential |
-| `get_parallel_data()` | Get parallel data without moving |
-| `clear_parallel_chunks()` | Clear parallel buffer |
-| `storage_status()` | Get detailed status |
+| `append_chunk(owner, Vec<u8>)` | Add to sequential buffer (checks cap) |
+| `buffer_size(owner)` | Get sequential buffer size |
+| `get_buffer_data(owner)` | Get and clear sequential buffer |
+| `clear_buffer(owner)` | Clear sequential buffer |
+| `append_parallel_chunk(owner, u32, Vec<u8>)` | Add chunk with ID (checks cap) |
+| `parallel_chunk_count(owner)` | Get parallel chunk count |
+| `parallel_chunks_complete(owner, u32)` | Check all chunks received |
+| `missing_chunks(owner, u32)` | Get missing chunk IDs |
+| `consolidate_parallel_chunks(owner)` | Merge parallel to sequential |
+| `get_parallel_data(owner)` | Get parallel data without moving |
+| `clear_parallel_chunks(owner)` | Clear parallel buffer |
+| `storage_status(owner)` | Get detailed status |
+| `total_buffered_bytes(owner)` | Combined buffered bytes for owner |
+| `set_max_bytes_per_owner(Option<usize>)` | Set per-owner byte cap (`None` = unlimited) |
+| `max_bytes_per_owner()` | Get the current cap |
 
 ### `intercanister`
 

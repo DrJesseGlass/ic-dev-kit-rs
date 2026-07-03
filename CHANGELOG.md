@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **http** - `HttpRequest` and `HttpResponse` now derive `CandidType`. Previously
+  they only derived serde traits, so using them as `#[ic_cdk::query]` argument or
+  return types (as documented in the README) failed to compile. An integration
+  test (`tests/http_endpoint.rs`) and a non-ignored doctest now exercise the
+  types through a real endpoint to keep this from regressing.
+
+### Changed (breaking)
+
+- **large_objects** - Buffers are now keyed by an `owner: Principal` (pass
+  `ic_cdk::api::msg_caller()` from endpoints). Previously all callers shared a
+  single global buffer, so concurrent uploads from different principals could
+  interleave and corrupt each other's data. All functions take `owner` as their
+  first argument; `generate_upload_endpoints!` passes the caller automatically.
+- **large_objects** - Total buffered bytes per owner are capped
+  (`DEFAULT_MAX_BYTES_PER_OWNER` = 2 GiB); `append_chunk`, `append_parallel_chunk`,
+  and `load_to_buffer` now return `Result` and reject writes that would exceed
+  the cap. Configure with `set_max_bytes_per_owner` (`None` disables).
+- **auth** - Removed the `AuthStorage` type and the internal storage/cache split;
+  both were in-memory `HashSet`s holding duplicate copies of the same data.
+  `Auth::new()` takes no arguments; `Auth::with_principals(...)` replaces
+  `AuthStorage::with_initial_principal`. `save_to_storage`/`load_from_storage`
+  are gone — upgrade persistence remains via `save_to_bytes`/`init_from_saved`.
+- **auth** - Guard and management functions no longer trap when auth was never
+  initialized; they return an error instead (`AuthError::NotInitialized`).
+  Removed unused `AuthError::StorageError`/`SerializationError` variants.
+- **telemetry** - `export_telemetry_endpoints!` is now self-contained: the
+  monitoring-admin endpoints are guarded by the new
+  `telemetry::is_monitoring_admin` (controllers always allowed, plus `auth`
+  admins when initialized) instead of silently requiring
+  `export_auth_endpoints!` to have been invoked first in the same scope.
+- **telemetry** - Monitoring-principal state lazily initializes on first use
+  instead of trapping when `telemetry::init()` was not called.
+
+### Added
+
+- GitHub Actions CI: native tests plus `cargo check` for
+  `wasm32-unknown-unknown` (the target consumers actually build for), with and
+  without the ML features.
+
 ## [0.1.0] - 2026-06-29
 
 Initial release. Built against `ic-cdk` 0.20, `candid` 0.10, `ic-stable-structures`

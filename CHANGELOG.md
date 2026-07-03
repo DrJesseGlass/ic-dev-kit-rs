@@ -5,7 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-07-03
+
+Correctness and hardening release: HTTP types now work as IC endpoint types,
+upload buffers are isolated per caller and size-capped, the auth/telemetry
+modules are decoupled, and CI now checks the `wasm32-unknown-unknown` target.
+Contains breaking API changes in `auth` and `large_objects` — see below.
 
 ### Fixed
 
@@ -44,6 +49,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `export_telemetry_endpoints!(admin_guard = "my_guard")` - optional macro arm
+  to supply a custom guard for the monitoring administration endpoints
+  (defaults to `telemetry::is_monitoring_admin`).
 - GitHub Actions CI: native tests plus `cargo check` for
   `wasm32-unknown-unknown` (the target consumers actually build for), with and
   without the ML features.

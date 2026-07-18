@@ -207,6 +207,82 @@ pub struct HttpResponse {
     /// Whether to upgrade to update call (for certified responses)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub upgrade: Option<bool>,
+    /// Strategy for streaming the rest of the body via callback.
+    ///
+    /// Candid function references have no serde `Serialize` impl, so this
+    /// field is omitted from JSON output; it is still present on the candid
+    /// wire, which is what the HTTP gateway reads.
+    #[serde(skip_serializing)]
+    pub streaming_strategy: Option<StreamingStrategy>,
+}
+
+impl HttpResponse {
+    /// Create a response with the given status, headers, and body; all
+    /// optional gateway fields (`upgrade`, `streaming_strategy`) start unset.
+    pub fn new(status_code: u16, headers: Vec<(String, String)>, body: Vec<u8>) -> Self {
+        Self {
+            status_code,
+            headers,
+            body,
+            upgrade: None,
+            streaming_strategy: None,
+        }
+    }
+
+    /// Attach a streaming strategy to this response (builder-style).
+    pub fn with_streaming_strategy(mut self, strategy: StreamingStrategy) -> Self {
+        self.streaming_strategy = Some(strategy);
+        self
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Streaming (IC HTTP gateway callback protocol)
+// ═══════════════════════════════════════════════════════════════
+
+// Reference to the query method the HTTP gateway calls to fetch the next
+// body chunk: `(StreamingCallbackToken) -> (StreamingCallbackHttpResponse) query`.
+candid::define_function!(
+    pub StreamingCallback : (StreamingCallbackToken) -> (StreamingCallbackHttpResponse) query
+);
+
+/// Token passed back to the streaming callback to identify the next chunk.
+///
+/// The gateway treats this value as opaque and returns it verbatim to the
+/// callback. The field layout follows the certified asset canister convention.
+#[derive(Debug, Clone, PartialEq, Eq, CandidType, Deserialize)]
+pub struct StreamingCallbackToken {
+    /// Identifies the resource being streamed (e.g. a path or object key).
+    pub key: String,
+    /// Content encoding of the streamed body (e.g. "identity", "gzip").
+    pub content_encoding: String,
+    /// Zero-based index of the next chunk to return.
+    pub index: candid::Nat,
+    /// Optional SHA-256 of the full body, for certification flows.
+    pub sha256: Option<Vec<u8>>,
+}
+
+/// Strategy for streaming a response body larger than one message.
+#[derive(Debug, Clone, CandidType, Deserialize)]
+pub enum StreamingStrategy {
+    /// The gateway repeatedly calls `callback` with the current token until
+    /// the callback returns a response with no token.
+    Callback {
+        /// Query method to call for each subsequent chunk.
+        callback: StreamingCallback,
+        /// Token identifying the first chunk to fetch.
+        token: StreamingCallbackToken,
+    },
+}
+
+/// Response returned by a streaming callback: one chunk plus the token for
+/// the next one (or `None` when the body is complete).
+#[derive(Debug, Clone, CandidType, Deserialize)]
+pub struct StreamingCallbackHttpResponse {
+    /// This chunk of the response body.
+    pub body: Vec<u8>,
+    /// Token for the next chunk, or `None` if this was the last chunk.
+    pub token: Option<StreamingCallbackToken>,
 }
 
 /// HTTP method enumeration.
@@ -258,15 +334,14 @@ impl HttpMethod {
 ///
 /// Automatically sets `Content-Type: application/json` and CORS headers.
 pub fn json_response(status_code: u16, body: String) -> HttpResponse {
-    HttpResponse {
+    HttpResponse::new(
         status_code,
-        headers: vec![
+        vec![
             ("Content-Type".to_string(), "application/json".to_string()),
             ("Access-Control-Allow-Origin".to_string(), "*".to_string()),
         ],
-        body: body.into_bytes(),
-        upgrade: None,
-    }
+        body.into_bytes(),
+    )
 }
 
 /// Create an error response with JSON body.
@@ -295,10 +370,8 @@ pub fn success_response<T: Serialize>(data: &T) -> HttpResult<HttpResponse> {
 /// Used for certified queries that need to modify state.
 pub fn upgrade_response() -> HttpResponse {
     HttpResponse {
-        status_code: 204,
-        headers: vec![],
-        body: vec![],
         upgrade: Some(true),
+        ..HttpResponse::new(204, vec![], vec![])
     }
 }
 
@@ -306,9 +379,9 @@ pub fn upgrade_response() -> HttpResponse {
 ///
 /// Responds to OPTIONS requests with appropriate CORS headers.
 pub fn cors_preflight_response() -> HttpResponse {
-    HttpResponse {
-        status_code: 204,
-        headers: vec![
+    HttpResponse::new(
+        204,
+        vec![
             ("Access-Control-Allow-Origin".to_string(), "*".to_string()),
             (
                 "Access-Control-Allow-Methods".to_string(),
@@ -319,9 +392,8 @@ pub fn cors_preflight_response() -> HttpResponse {
                 "Content-Type, Authorization".to_string(),
             ),
         ],
-        body: vec![],
-        upgrade: None,
-    }
+        vec![],
+    )
 }
 
 /// Escape special characters in a JSON string.

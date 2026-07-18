@@ -65,7 +65,10 @@ pub use candid::Principal;
 /// Prelude module
 pub mod prelude {
     pub use crate::auth::{self, AuthError, AuthResult};
-    pub use crate::http::{self, HttpError, HttpRequest, HttpResponse, HttpResult, HttpMethod};
+    pub use crate::http::{
+        self, HttpError, HttpMethod, HttpRequest, HttpResponse, HttpResult, StreamingCallback,
+        StreamingCallbackHttpResponse, StreamingCallbackToken, StreamingStrategy,
+    };
     pub use crate::large_objects;
     pub use crate::intercanister;
     pub use candid::Principal;

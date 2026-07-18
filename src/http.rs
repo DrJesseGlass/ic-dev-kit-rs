@@ -207,6 +207,70 @@ pub struct HttpResponse {
     /// Whether to upgrade to update call (for certified responses)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub upgrade: Option<bool>,
+    /// Strategy for streaming the rest of the body via callback.
+    ///
+    /// Candid function references have no serde `Serialize` impl, so this
+    /// field is omitted from JSON output; it is still present on the candid
+    /// wire, which is what the HTTP gateway reads.
+    #[serde(skip_serializing, default)]
+    pub streaming_strategy: Option<StreamingStrategy>,
+}
+
+impl HttpResponse {
+    /// Attach a streaming strategy to this response (builder-style).
+    pub fn with_streaming_strategy(mut self, strategy: StreamingStrategy) -> Self {
+        self.streaming_strategy = Some(strategy);
+        self
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Streaming (IC HTTP gateway callback protocol)
+// ═══════════════════════════════════════════════════════════════
+
+// Reference to the query method the HTTP gateway calls to fetch the next
+// body chunk: `(StreamingCallbackToken) -> (StreamingCallbackHttpResponse) query`.
+candid::define_function!(
+    pub StreamingCallback : (StreamingCallbackToken) -> (StreamingCallbackHttpResponse) query
+);
+
+/// Token passed back to the streaming callback to identify the next chunk.
+///
+/// The gateway treats this value as opaque and returns it verbatim to the
+/// callback. The field layout follows the certified asset canister convention.
+#[derive(Debug, Clone, PartialEq, Eq, CandidType, Serialize, Deserialize)]
+pub struct StreamingCallbackToken {
+    /// Identifies the resource being streamed (e.g. a path or object key).
+    pub key: String,
+    /// Content encoding of the streamed body (e.g. "identity", "gzip").
+    pub content_encoding: String,
+    /// Zero-based index of the next chunk to return.
+    pub index: candid::Nat,
+    /// Optional SHA-256 of the full body, for certification flows.
+    pub sha256: Option<Vec<u8>>,
+}
+
+/// Strategy for streaming a response body larger than one message.
+#[derive(Debug, Clone, CandidType, Deserialize)]
+pub enum StreamingStrategy {
+    /// The gateway repeatedly calls `callback` with the current token until
+    /// the callback returns a response with no token.
+    Callback {
+        /// Query method to call for each subsequent chunk.
+        callback: StreamingCallback,
+        /// Token identifying the first chunk to fetch.
+        token: StreamingCallbackToken,
+    },
+}
+
+/// Response returned by a streaming callback: one chunk plus the token for
+/// the next one (or `None` when the body is complete).
+#[derive(Debug, Clone, CandidType, Serialize, Deserialize)]
+pub struct StreamingCallbackHttpResponse {
+    /// This chunk of the response body.
+    pub body: Vec<u8>,
+    /// Token for the next chunk, or `None` if this was the last chunk.
+    pub token: Option<StreamingCallbackToken>,
 }
 
 /// HTTP method enumeration.
@@ -266,6 +330,7 @@ pub fn json_response(status_code: u16, body: String) -> HttpResponse {
         ],
         body: body.into_bytes(),
         upgrade: None,
+        streaming_strategy: None,
     }
 }
 
@@ -299,6 +364,7 @@ pub fn upgrade_response() -> HttpResponse {
         headers: vec![],
         body: vec![],
         upgrade: Some(true),
+        streaming_strategy: None,
     }
 }
 
@@ -321,6 +387,7 @@ pub fn cors_preflight_response() -> HttpResponse {
         ],
         body: vec![],
         upgrade: None,
+        streaming_strategy: None,
     }
 }
 

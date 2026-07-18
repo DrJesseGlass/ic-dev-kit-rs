@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-07-18
+
+Adds IC HTTP gateway callback streaming support to the `http` module. Contains
+one breaking change: struct-literal construction of `HttpResponse` must add the
+new `streaming_strategy` field. Construction via the new `HttpResponse::new` or
+the existing response builders is unaffected.
+
+### Added
+
+- **http** - `streaming_strategy: Option<StreamingStrategy>` on `HttpResponse`,
+  implementing the IC HTTP gateway callback streaming protocol. New types:
+  `StreamingStrategy` (single `Callback` variant), `StreamingCallback` (candid
+  function reference to a
+  `(StreamingCallbackToken) -> (StreamingCallbackHttpResponse) query` method),
+  `StreamingCallbackToken` (certified asset canister field convention: `key`,
+  `content_encoding`, `index: Nat`, `sha256`), and
+  `StreamingCallbackHttpResponse`. All are re-exported from the prelude.
+  Note: JSON serialization of `HttpResponse` omits `streaming_strategy`
+  (candid function references have no serde `Serialize` impl); the field is
+  present on the candid wire, which is what the gateway reads.
+- **http** - `HttpResponse::new(status_code, headers, body)` base constructor
+  (optional gateway fields start unset) and builder-style
+  `HttpResponse::with_streaming_strategy`. Prefer `HttpResponse::new` over
+  struct literals; future optional fields will not break it.
+
+### Changed (breaking)
+
+- **http** - `HttpResponse` gained the `streaming_strategy` field, so
+  downstream struct-literal construction without `..` must add it.
+
 ## [0.2.0] - 2026-07-03
 
 Correctness and hardening release: HTTP types now work as IC endpoint types,

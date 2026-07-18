@@ -1,6 +1,6 @@
 [package]
 name = "ic-dev-kit-rs"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Rust toolkit for IC development - standardizes HTTP generation, large object storage, Canister Geek integration, and common canister patterns"
 authors = ["Jesse Glass <dr.jesse.glass@gmail.com>"]

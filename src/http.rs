@@ -212,11 +212,23 @@ pub struct HttpResponse {
     /// Candid function references have no serde `Serialize` impl, so this
     /// field is omitted from JSON output; it is still present on the candid
     /// wire, which is what the HTTP gateway reads.
-    #[serde(skip_serializing, default)]
+    #[serde(skip_serializing)]
     pub streaming_strategy: Option<StreamingStrategy>,
 }
 
 impl HttpResponse {
+    /// Create a response with the given status, headers, and body; all
+    /// optional gateway fields (`upgrade`, `streaming_strategy`) start unset.
+    pub fn new(status_code: u16, headers: Vec<(String, String)>, body: Vec<u8>) -> Self {
+        Self {
+            status_code,
+            headers,
+            body,
+            upgrade: None,
+            streaming_strategy: None,
+        }
+    }
+
     /// Attach a streaming strategy to this response (builder-style).
     pub fn with_streaming_strategy(mut self, strategy: StreamingStrategy) -> Self {
         self.streaming_strategy = Some(strategy);
@@ -238,7 +250,7 @@ candid::define_function!(
 ///
 /// The gateway treats this value as opaque and returns it verbatim to the
 /// callback. The field layout follows the certified asset canister convention.
-#[derive(Debug, Clone, PartialEq, Eq, CandidType, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, CandidType, Deserialize)]
 pub struct StreamingCallbackToken {
     /// Identifies the resource being streamed (e.g. a path or object key).
     pub key: String,
@@ -265,7 +277,7 @@ pub enum StreamingStrategy {
 
 /// Response returned by a streaming callback: one chunk plus the token for
 /// the next one (or `None` when the body is complete).
-#[derive(Debug, Clone, CandidType, Serialize, Deserialize)]
+#[derive(Debug, Clone, CandidType, Deserialize)]
 pub struct StreamingCallbackHttpResponse {
     /// This chunk of the response body.
     pub body: Vec<u8>,
@@ -322,16 +334,14 @@ impl HttpMethod {
 ///
 /// Automatically sets `Content-Type: application/json` and CORS headers.
 pub fn json_response(status_code: u16, body: String) -> HttpResponse {
-    HttpResponse {
+    HttpResponse::new(
         status_code,
-        headers: vec![
+        vec![
             ("Content-Type".to_string(), "application/json".to_string()),
             ("Access-Control-Allow-Origin".to_string(), "*".to_string()),
         ],
-        body: body.into_bytes(),
-        upgrade: None,
-        streaming_strategy: None,
-    }
+        body.into_bytes(),
+    )
 }
 
 /// Create an error response with JSON body.
@@ -360,11 +370,8 @@ pub fn success_response<T: Serialize>(data: &T) -> HttpResult<HttpResponse> {
 /// Used for certified queries that need to modify state.
 pub fn upgrade_response() -> HttpResponse {
     HttpResponse {
-        status_code: 204,
-        headers: vec![],
-        body: vec![],
         upgrade: Some(true),
-        streaming_strategy: None,
+        ..HttpResponse::new(204, vec![], vec![])
     }
 }
 
@@ -372,9 +379,9 @@ pub fn upgrade_response() -> HttpResponse {
 ///
 /// Responds to OPTIONS requests with appropriate CORS headers.
 pub fn cors_preflight_response() -> HttpResponse {
-    HttpResponse {
-        status_code: 204,
-        headers: vec![
+    HttpResponse::new(
+        204,
+        vec![
             ("Access-Control-Allow-Origin".to_string(), "*".to_string()),
             (
                 "Access-Control-Allow-Methods".to_string(),
@@ -385,10 +392,8 @@ pub fn cors_preflight_response() -> HttpResponse {
                 "Content-Type, Authorization".to_string(),
             ),
         ],
-        body: vec![],
-        upgrade: None,
-        streaming_strategy: None,
-    }
+        vec![],
+    )
 }
 
 /// Escape special characters in a JSON string.

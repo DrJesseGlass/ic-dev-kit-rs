@@ -34,10 +34,13 @@
 //! - [`http`] - HTTP request/response types and routing
 //! - [`large_objects`] - Chunked uploads for large files
 //! - [`intercanister`] - Inter-canister call wrappers with logging
-//! - [`storage`] - Type-safe stable storage (requires `storage` feature)
-//! - [`telemetry`] - Canistergeek integration (requires `telemetry` feature)
-//! - [`candle`] - ML model traits (requires `candle` feature)
-//! - [`text_generation`] - LLM generation (requires `text-generation` feature)
+//! - `storage` - Type-safe stable storage (requires `storage` feature)
+//! - `telemetry` - Canistergeek integration (requires `telemetry` feature)
+//! - `candle` - ML model traits (requires `candle` feature)
+//! - `text_generation` - LLM generation (requires `text-generation` feature)
+//!
+//! (Feature-gated modules are not linked so `cargo doc` succeeds under any
+//! feature set.)
 
 pub mod auth;
 pub mod http;
@@ -58,6 +61,27 @@ pub mod text_generation;
 
 #[cfg(all(feature = "text-generation", feature = "storage"))]
 pub mod model_server;
+
+/// Support items for the exported macros. Not part of the public API.
+///
+/// A `#[cfg(feature = "telemetry")]` written inside a `macro_rules!` body is
+/// evaluated against the features of the crate that *expands* the macro (the
+/// consumer), not this crate's. The macros therefore call these shims, which
+/// are resolved here and become no-ops when `telemetry` is disabled.
+#[doc(hidden)]
+pub mod __private {
+    #[cfg(feature = "telemetry")]
+    pub use crate::telemetry::{collect_metrics, log_error, log_info};
+
+    #[cfg(not(feature = "telemetry"))]
+    pub fn collect_metrics() {}
+
+    #[cfg(not(feature = "telemetry"))]
+    pub fn log_info(_message: impl Into<String>) {}
+
+    #[cfg(not(feature = "telemetry"))]
+    pub fn log_error(_message: impl Into<String>) {}
+}
 
 pub use candid::Principal;
 

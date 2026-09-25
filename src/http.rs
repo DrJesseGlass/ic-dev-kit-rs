@@ -304,20 +304,27 @@ impl FromStr for HttpMethod {
     type Err = HttpError;
 
     fn from_str(method: &str) -> Result<Self, Self::Err> {
-        match method.to_ascii_uppercase().as_str() {
-            "GET" => Ok(HttpMethod::GET),
-            "POST" => Ok(HttpMethod::POST),
-            "PUT" => Ok(HttpMethod::PUT),
-            "DELETE" => Ok(HttpMethod::DELETE),
-            "PATCH" => Ok(HttpMethod::PATCH),
-            "OPTIONS" => Ok(HttpMethod::OPTIONS),
-            "HEAD" => Ok(HttpMethod::HEAD),
-            _ => Err(HttpError::MethodNotAllowed),
-        }
+        HttpMethod::ALL
+            .iter()
+            .find(|m| m.as_str().eq_ignore_ascii_case(method))
+            .copied()
+            .ok_or(HttpError::MethodNotAllowed)
     }
 }
 
 impl HttpMethod {
+    /// Every supported method; [`as_str`](Self::as_str) is the single source
+    /// of truth for their spelling.
+    const ALL: [HttpMethod; 7] = [
+        HttpMethod::GET,
+        HttpMethod::POST,
+        HttpMethod::PUT,
+        HttpMethod::DELETE,
+        HttpMethod::PATCH,
+        HttpMethod::OPTIONS,
+        HttpMethod::HEAD,
+    ];
+
     /// Get the method as a static string.
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -765,15 +772,15 @@ impl Router {
     ///
     /// Automatically handles CORS preflight (OPTIONS) requests.
     pub fn handle(&self, request: HttpRequest) -> HttpResponse {
-        // Handle CORS preflight
-        if request.method.to_uppercase() == "OPTIONS" {
-            return cors_preflight_response();
-        }
-
         let method: HttpMethod = match request.method.parse() {
             Ok(m) => m,
             Err(e) => return e.to_response(),
         };
+
+        // Handle CORS preflight
+        if method == HttpMethod::OPTIONS {
+            return cors_preflight_response();
+        }
 
         let path = extract_path(&request.url);
         let for_method = || self.routes.iter().filter(|(m, _, _)| *m == method);

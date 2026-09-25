@@ -148,14 +148,13 @@ pub fn total_buffered_bytes_all_owners() -> usize {
     sequential + parallel
 }
 
-/// Enforce both caps for a write that adds `incoming` net bytes to `owner`.
+/// Enforce both caps for a write to `owner` that replaces `replaced` of its
+/// currently buffered bytes with `incoming` new bytes.
 ///
-/// `owner_current` is the owner's usage excluding anything the write replaces;
-/// the global total is measured here, and the same replaced bytes are
-/// subtracted from it via `replaced`. Must be called before taking a mutable
-/// borrow on the buffer maps.
-fn check_capacity(owner_current: usize, replaced: usize, incoming: usize) -> Result<(), String> {
+/// Must be called before taking a mutable borrow on the buffer maps.
+fn check_capacity(owner: Principal, replaced: usize, incoming: usize) -> Result<(), String> {
     if let Some(limit) = max_bytes_per_owner() {
+        let owner_current = total_buffered_bytes(owner).saturating_sub(replaced);
         if owner_current.saturating_add(incoming) > limit {
             return Err(format!(
                 "Upload buffer limit exceeded: {} buffered + {} incoming > {} byte per-owner cap",
@@ -191,7 +190,7 @@ pub fn append_chunk(owner: Principal, chunk: Vec<u8>) -> Result<usize, String> {
         // Nothing to add; avoid creating an empty entry for the owner.
         return Ok(buffer_size(owner));
     }
-    check_capacity(total_buffered_bytes(owner), 0, chunk.len())?;
+    check_capacity(owner, 0, chunk.len())?;
     BUFFERS.with(|buffers| {
         let mut buffers = buffers.borrow_mut();
         let buffer = buffers.entry(owner).or_default();
@@ -225,8 +224,13 @@ pub fn get_buffer_data(owner: Principal) -> Vec<u8> {
 ///
 /// Returns an error if the data would exceed a cap.
 pub fn load_to_buffer(owner: Principal, data: Vec<u8>) -> Result<(), String> {
-    // Replaces the sequential buffer, so only parallel bytes count as current.
-    check_capacity(parallel_buffer_size(owner), buffer_size(owner), data.len())?;
+    if data.is_empty() {
+        // Replacing with nothing is a clear; avoid leaving an empty entry.
+        clear_buffer(owner);
+        return Ok(());
+    }
+    // Replaces the sequential buffer, so its current contents are freed.
+    check_capacity(owner, buffer_size(owner), data.len())?;
     BUFFERS.with(|buffers| {
         buffers.borrow_mut().insert(owner, data);
     });
@@ -265,11 +269,7 @@ pub fn append_parallel_chunk(
             .and_then(|m| m.get(&chunk_id))
             .map_or(0, Vec::len)
     });
-    check_capacity(
-        total_buffered_bytes(owner) - replaced,
-        replaced,
-        chunk.len(),
-    )?;
+    check_capacity(owner, replaced, chunk.len())?;
     BUFFER_MAPS.with(|maps| {
         let mut maps = maps.borrow_mut();
         let map = maps.entry(owner).or_default();
@@ -539,10 +539,9 @@ macro_rules! generate_upload_endpoints {
                 $crate::storage::save_bytes(r, &key, data);
             });
 
-            #[cfg(feature = "telemetry")]
-            $crate::telemetry::log_info(&format!("Saved {} bytes to key '{}'", size, key));
-
-            Ok(format!("Saved {} bytes to key '{}'", size, key))
+            let message = format!("Saved {} bytes to key '{}'", size, key);
+            $crate::__private::log_info(&message);
+            Ok(message)
         }
 
         #[ic_cdk::update(guard = $guard)]
@@ -557,10 +556,9 @@ macro_rules! generate_upload_endpoints {
 
             $crate::large_objects::clear_parallel_chunks(owner);
 
-            #[cfg(feature = "telemetry")]
-            $crate::telemetry::log_info(&format!("Saved {} bytes to key '{}'", size, key));
-
-            Ok(format!("Saved {} bytes to key '{}'", size, key))
+            let message = format!("Saved {} bytes to key '{}'", size, key);
+            $crate::__private::log_info(&message);
+            Ok(message)
         }
 
         #[ic_cdk::query(guard = $guard)]
@@ -780,9 +778,63 @@ mod tests {
         append_chunk(owner, vec![]).unwrap();
         assert!(BUFFERS.with(|b| !b.borrow().contains_key(&owner)));
 
+        append_chunk(owner, vec![1]).unwrap();
+        load_to_buffer(owner, vec![]).unwrap();
+        assert!(BUFFERS.with(|b| !b.borrow().contains_key(&owner)));
+
         append_parallel_chunk(owner, 0, vec![1]).unwrap();
         assert!(remove_parallel_chunk(owner, 0));
         assert!(!remove_parallel_chunk(owner, 0));
         assert!(BUFFER_MAPS.with(|m| !m.borrow().contains_key(&owner)));
+    }
+
+    /// Expands `generate_upload_endpoints!` with a registry so its body is
+    /// type-checked in CI. Endpoints that read `msg_caller` are not called
+    /// natively; the storage ones do not touch `ic0` and are exercised.
+    #[cfg(feature = "storage")]
+    mod endpoints {
+        use crate::storage::StorageRegistry;
+        use std::cell::RefCell;
+        use std::collections::HashMap;
+
+        #[derive(Default)]
+        struct MapRegistry(HashMap<String, Vec<u8>>);
+
+        impl StorageRegistry for MapRegistry {
+            fn insert(&mut self, key: String, value: Vec<u8>) {
+                self.0.insert(key, value);
+            }
+
+            fn get(&self, key: &str) -> Option<Vec<u8>> {
+                self.0.get(key).cloned()
+            }
+
+            fn remove(&mut self, key: &str) -> Option<Vec<u8>> {
+                self.0.remove(key)
+            }
+        }
+
+        thread_local! {
+            static REGISTRY: RefCell<MapRegistry> = RefCell::new(MapRegistry::default());
+        }
+
+        fn allow_all() -> Result<(), String> {
+            Ok(())
+        }
+
+        crate::generate_upload_endpoints!(guard = "allow_all", registry = REGISTRY);
+
+        #[test]
+        fn storage_endpoints_expand_and_work() {
+            assert!(!storage_key_exists("k".to_string()));
+            assert_eq!(get_storage_size("k".to_string()), None);
+            assert!(delete_storage_key("k".to_string()).is_err());
+
+            REGISTRY.with(|r| crate::storage::save_bytes(r, "k", vec![1, 2, 3]));
+            assert!(storage_key_exists("k".to_string()));
+            assert_eq!(get_storage_size("k".to_string()), Some(3));
+            assert!(delete_storage_key("k".to_string()).is_ok());
+            assert!(!storage_key_exists("k".to_string()));
+        }
     }
 }

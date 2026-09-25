@@ -288,19 +288,23 @@ pub fn add_principal(principal: Principal) -> Result<(), String> {
 ///
 /// Refuses to remove the last authorized principal: emptying the set would
 /// lock every guarded endpoint until the next upgrade. Add a replacement
-/// first. Removing a principal that is not in the set is a no-op.
+/// first. Removing a principal that is not in the set succeeds, with a
+/// message saying it was absent.
 ///
 /// # Returns
 ///
-/// Success message, or an error string if auth is not initialized or
-/// `principal` is the only authorized principal.
+/// A message describing what happened, or an error string if auth is not
+/// initialized or `principal` is the only authorized principal.
 pub fn remove_principal(principal: Principal) -> Result<String, String> {
     with_auth(|auth| {
         if auth.len() == 1 && auth.is_authorized(&principal) {
             return Err(AuthError::LastPrincipal.to_string());
         }
-        auth.remove_principal(&principal);
-        Ok("Successfully removed principal from allowlist".to_string())
+        Ok(if auth.remove_principal(&principal) {
+            "Successfully removed principal from allowlist".to_string()
+        } else {
+            "Principal was not in the allowlist".to_string()
+        })
     })?
 }
 
@@ -445,8 +449,9 @@ mod tests {
         assert!(err.contains("last authorized principal"), "{err}");
         assert_eq!(list_principals().unwrap(), vec![only]);
 
-        // Removing an absent principal is a no-op, even with one left.
-        remove_principal(other).unwrap();
+        // Removing an absent principal succeeds but says so, even with one left.
+        let msg = remove_principal(other).unwrap();
+        assert!(msg.contains("not in the allowlist"), "{msg}");
         assert_eq!(list_principals().unwrap(), vec![only]);
 
         // With a replacement in place, removal succeeds.

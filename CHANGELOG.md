@@ -34,9 +34,18 @@ direct `canistergeek_ic_rust` dependency. Contains breaking changes — see belo
 - **text_generation** - `tokenizers::find_eos_token` returned `0` as a
   "not found" sentinel, but `0` is a real token id in most vocabularies. It now
   returns `Option<u32>`.
-- **large_objects** - Empty appends no longer create a per-owner entry, and
-  `remove_parallel_chunk` drops the owner's map when it empties, so buffers
-  from one-off callers do not accumulate.
+- **large_objects** - Empty appends (and `load_to_buffer` with empty data) no
+  longer create a per-owner entry, and `remove_parallel_chunk` drops the
+  owner's map when it empties, so buffers from one-off callers do not
+  accumulate.
+- **macros** - `generate_upload_endpoints!` and `generate_model_endpoints!`
+  used `#[cfg(feature = "telemetry")]` inside their bodies, which Rust
+  evaluates against the *consumer* crate's features. Telemetry calls in the
+  generated endpoints were silently compiled out unless the consumer also
+  declared a feature named `telemetry`. The macros now go through
+  `#[doc(hidden)]` shims resolved in this crate.
+- **docs** - `cargo doc` no longer fails with `-D warnings` when feature-gated
+  modules are disabled (the crate docs linked to them unconditionally).
 
 ### Changed (breaking)
 
@@ -45,7 +54,9 @@ direct `canistergeek_ic_rust` dependency. Contains breaking changes — see belo
   since an empty allowlist locks every guarded endpoint until the next
   upgrade. `Auth::remove_principal` now returns `bool`; `Auth::len` and
   `Auth::is_empty` were added. `deauthorize_principal` returns
-  `Result<String, String>` instead of folding errors into a `String`.
+  `Result<String, String>` instead of folding errors into a `String`, and
+  removing a principal that was not in the allowlist succeeds with a message
+  saying so rather than claiming a removal.
 - **storage** - `StorageRegistry::get`/`remove` take `&str` instead of
   `&String`. Custom implementors must update their signatures.
 - **large_objects** - New cap on bytes buffered across *all* owners

@@ -302,8 +302,7 @@ macro_rules! generate_model_endpoints {
 
         #[ic_cdk::update(guard = "__model_admin_guard")]
         pub fn setup_model() -> Result<(), String> {
-            #[cfg(feature = "telemetry")]
-            $crate::telemetry::collect_metrics();
+            $crate::__private::collect_metrics();
 
             let result = $server.with(|s| {
                 $registry.with(|r| {
@@ -311,10 +310,9 @@ macro_rules! generate_model_endpoints {
                 })
             });
 
-            #[cfg(feature = "telemetry")]
             match &result {
-                Ok(()) => $crate::telemetry::log_info("Model loaded"),
-                Err(e) => $crate::telemetry::log_error(format!("Load failed: {}", e)),
+                Ok(()) => $crate::__private::log_info("Model loaded"),
+                Err(e) => $crate::__private::log_error(format!("Load failed: {}", e)),
             }
 
             result
@@ -324,16 +322,14 @@ macro_rules! generate_model_endpoints {
         pub fn generate(
             request: $crate::model_server::InferenceRequest,
         ) -> $crate::model_server::InferenceResponse {
-            #[cfg(feature = "telemetry")]
-            $crate::telemetry::collect_metrics();
+            $crate::__private::collect_metrics();
 
             let config = request.config.unwrap_or_default();
 
             $server.with(|s| match s.generate(request.prompt, &config) {
                 Ok(response) => response.into(),
                 Err(e) => {
-                    #[cfg(feature = "telemetry")]
-                    $crate::telemetry::log_error(format!("Generation failed: {}", e));
+                    $crate::__private::log_error(format!("Generation failed: {}", e));
                     $crate::model_server::InferenceResponse::failure(e)
                 }
             })
@@ -358,4 +354,141 @@ macro_rules! generate_model_endpoints {
             })
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    //! Expands `generate_model_endpoints!` so its body is type-checked in CI.
+    //! Endpoints that reach `ic0` (`setup_model`, `generate`) are not called
+    //! natively; the rest are exercised.
+    use super::*;
+    use crate::candle::{CandleModel, ModelMetadata};
+    use std::collections::HashMap;
+
+    struct DummyModel {
+        tokens: usize,
+    }
+
+    impl CandleModel for DummyModel {
+        fn load(_weights: Vec<u8>, _config: Option<Vec<u8>>) -> Result<Self, String> {
+            Ok(Self { tokens: 0 })
+        }
+
+        fn metadata(&self) -> ModelMetadata {
+            ModelMetadata {
+                name: "dummy".to_string(),
+                version: "0".to_string(),
+                architecture: "test".to_string(),
+                parameters: 0,
+                context_length: None,
+            }
+        }
+
+        fn reset(&mut self) {
+            self.tokens = 0;
+        }
+    }
+
+    impl AutoregressiveModel for DummyModel {
+        fn init_generation(
+            &mut self,
+            _prompt: String,
+            _tokenizer: &dyn TokenizerHandle,
+            _config: &GenerationConfig,
+        ) -> Result<String, String> {
+            self.tokens = 1;
+            Ok("a".to_string())
+        }
+
+        fn generate_next_token(
+            &mut self,
+            _tokenizer: &dyn TokenizerHandle,
+        ) -> Result<String, String> {
+            self.tokens += 1;
+            Ok("b".to_string())
+        }
+
+        fn is_generation_complete(&self) -> bool {
+            false
+        }
+
+        fn generated_token_count(&self) -> usize {
+            self.tokens
+        }
+    }
+
+    struct DummyTokenizer;
+
+    impl TokenizerHandle for DummyTokenizer {
+        fn encode(&self, _text: &str) -> Result<Vec<u32>, String> {
+            Ok(Vec::new())
+        }
+
+        fn decode(&self, _tokens: &[u32]) -> Result<String, String> {
+            Ok(String::new())
+        }
+
+        fn vocab_size(&self) -> usize {
+            0
+        }
+    }
+
+    #[derive(Default)]
+    struct MapRegistry(HashMap<String, Vec<u8>>);
+
+    impl StorageRegistry for MapRegistry {
+        fn insert(&mut self, key: String, value: Vec<u8>) {
+            self.0.insert(key, value);
+        }
+
+        fn get(&self, key: &str) -> Option<Vec<u8>> {
+            self.0.get(key).cloned()
+        }
+
+        fn remove(&mut self, key: &str) -> Option<Vec<u8>> {
+            self.0.remove(key)
+        }
+    }
+
+    thread_local! {
+        static SERVER: ModelServer<DummyModel> = const { ModelServer::new() };
+        static REGISTRY: RefCell<MapRegistry> = RefCell::new(MapRegistry::default());
+    }
+
+    fn generate_guard() -> Result<(), String> {
+        Ok(())
+    }
+
+    // Exercises the explicit-guard arm; the no-guard arm delegates to it.
+    crate::generate_model_endpoints!(
+        server: SERVER,
+        registry: REGISTRY,
+        weights_key: "weights",
+        tokenizer_key: "tokenizer",
+        get_tokenizer: |_model| Box::new(DummyTokenizer),
+        generate_guard: "generate_guard",
+    );
+
+    #[test]
+    fn generated_endpoints_expand_and_report_unloaded_state() {
+        assert!(!is_model_loaded());
+        let info = get_model_info();
+        assert!(!info.loaded);
+        assert_eq!(info.current_tokens, 0);
+        assert!(info.metadata.is_none());
+        assert_eq!(reset_generation().unwrap_err(), "Model not initialized");
+        assert!(generate_guard().is_ok());
+        // Auth is never initialized in this test thread, so the admin guard
+        // rejects without trapping.
+        assert!(__model_admin_guard().is_err());
+    }
+
+    #[test]
+    fn failure_response_is_empty_and_unsuccessful() {
+        let resp = InferenceResponse::failure("boom");
+        assert!(!resp.success);
+        assert_eq!(resp.error.as_deref(), Some("boom"));
+        assert!(resp.generated_text.is_empty());
+        assert_eq!(resp.tokens_generated, 0);
+    }
 }

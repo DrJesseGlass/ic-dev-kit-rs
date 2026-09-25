@@ -112,6 +112,15 @@ direct `canistergeek_ic_rust` dependency. Contains breaking changes — see belo
 
 ### Dependencies and tooling
 
+- **Published on crates.io.** crates.io rejects git dependencies, so the
+  `telemetry` feature now depends on the crates.io `canistergeek_ic_rust` 0.6
+  instead of a git fork. That release still requires ic-cdk 0.19, which is
+  linked privately next to 0.20: Canistergeek exposes no ic-cdk types, both
+  versions share one `ic-cdk-executor`, and the measured wasm cost is about
+  400 bytes. The fork's two-line ic-cdk 0.20 patch is being sent upstream;
+  a later patch release will drop the overlap.
+- Release workflow: pushing a `vX.Y.Z` tag publishes to crates.io after
+  checking the tag matches `Cargo.toml`.
 - `thiserror` 1 → 2 for this crate's own error derives (`thiserror` 1 stays
   in the graph via transitive dependencies). Minimum `ic-cdk` 0.20.3 and
   `candid` 0.10.36.

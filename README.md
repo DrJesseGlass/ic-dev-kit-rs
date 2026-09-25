@@ -4,18 +4,28 @@ Rust toolkit for Internet Computer canister development. Standardizes common pat
 
 ## Installation
 
-Released via git tags (not yet on crates.io). Add to your `Cargo.toml`:
+Published on [crates.io](https://crates.io/crates/ic-dev-kit-rs). Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ic-dev-kit-rs = { git = "https://github.com/DrJesseGlass/ic-dev-kit-rs", tag = "v0.4.0" }
+ic-dev-kit-rs = "0.4"
 
 # Enable optional features (most common)
-ic-dev-kit-rs = { git = "https://github.com/DrJesseGlass/ic-dev-kit-rs", tag = "v0.4.0", features = ["storage", "telemetry"] }
+ic-dev-kit-rs = { version = "0.4", features = ["storage", "telemetry"] }
 
 # ML features (add "storage" too if you use model_server)
-ic-dev-kit-rs = { git = "https://github.com/DrJesseGlass/ic-dev-kit-rs", tag = "v0.4.0", features = ["text-generation", "storage"] }
+ic-dev-kit-rs = { version = "0.4", features = ["text-generation", "storage"] }
 ```
+
+Requires Rust 1.88 or newer (inherited from `ic-cdk` 0.20).
+
+**Note on `telemetry`:** the published `canistergeek_ic_rust` still requires
+`ic-cdk` 0.19, so enabling `telemetry` links a private copy of ic-cdk 0.19
+next to your 0.20. Your code stays on 0.20; Canistergeek exposes no ic-cdk
+types and both versions share one executor. The cost is a few hundred bytes
+of wasm. This goes away once upstream publishes an ic-cdk 0.20 release. The
+crate is re-exported as `ic_dev_kit_rs::telemetry::canistergeek_ic_rust`, so
+you do not need to depend on it directly.
 
 **Note on ML features + wasm:** the `candle`/`text-generation` features pull in
 `getrandom`, which has no default backend on `wasm32-unknown-unknown`. Canister
@@ -393,6 +403,15 @@ All functions take an `owner: Principal` as their first argument (use
 ## Examples
 
 See the [examples](./examples) directory for complete canister examples.
+
+## Releasing
+
+1. Add a `## [x.y.z]` entry to `CHANGELOG.md` and set `version` in `Cargo.toml`.
+   Under semver for 0.x, breaking changes bump the minor version.
+2. Commit, then `cargo publish --dry-run` to confirm the package builds.
+3. Push a tag `vx.y.z` on that commit. The release workflow checks the tag
+   matches `Cargo.toml` and runs `cargo publish` using the
+   `CARGO_REGISTRY_TOKEN` repository secret.
 
 ## License
 

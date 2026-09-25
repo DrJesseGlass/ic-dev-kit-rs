@@ -1,0 +1,35 @@
+name: Release
+
+# Publishes to crates.io when a version tag is pushed. The tag must match the
+# version in Cargo.toml exactly (tag v0.4.0 <-> version = "0.4.0").
+# Requires the CARGO_REGISTRY_TOKEN repository secret.
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Tag must match Cargo.toml version
+        run: |
+          manifest="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$manifest" != "$tag" ]; then
+            echo "Cargo.toml version $manifest does not match tag $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+      - name: Test
+        run: cargo test --all-features
+      - name: Publish
+        run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

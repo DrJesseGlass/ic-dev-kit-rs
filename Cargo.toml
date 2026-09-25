@@ -11,8 +11,8 @@ keywords = ["internet-computer", "ic", "dfinity", "canister", "blockchain"]
 categories = ["web-programming", "api-bindings"]
 # ic-cdk 0.20 requires 1.88; nothing here needs newer.
 rust-version = "1.88"
-# The example is its own workspace and is excluded automatically; keep CI
-# config out of the published tarball too.
+# Keep CI config and the example canister workspace out of the published
+# tarball.
 exclude = [".github/", "examples/"]
 
 [dependencies]
@@ -29,8 +29,8 @@ thiserror = "2.0"
 # Telemetry
 # crates.io canistergeek_ic_rust 0.6.0 still requires ic-cdk ^0.19, so the
 # `telemetry` feature links a private ic-cdk 0.19 next to our 0.20. That is
-# safe: canistergeek exposes no ic-cdk types, only calls seven ic0 wrappers,
-# and both ic-cdk versions share one ic-cdk-executor. Measured cost is ~400
+# safe: canistergeek exposes no ic-cdk types, only calls four stateless ic-cdk
+# API wrappers (debug_print, time, canister_cycle_balance, stable_size), and both ic-cdk versions share one ic-cdk-executor. Measured cost is ~400
 # bytes of wasm. The ic-cdk 0.20 migration is a two-line patch
 # (github.com/DrJesseGlass/canistergeek_ic_rust, PR pending upstream); switch
 # to the upstream release that requires ic-cdk 0.20 once it exists.
@@ -56,3 +56,8 @@ telemetry = ["canistergeek_ic_rust"]
 [lib]
 # Library only: the consumer's canister crate is the cdylib.
 crate-type = ["rlib"]
+
+[package.metadata.docs.rs]
+# Most modules (telemetry, storage, candle, text_generation, model_server) are
+# feature-gated; document them all on docs.rs.
+all-features = true

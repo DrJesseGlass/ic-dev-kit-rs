@@ -1,8 +1,8 @@
 name: Release
 
 # Publishes to crates.io when a version tag is pushed. The tag must match the
-# version in Cargo.toml exactly (tag v0.4.0 <-> version = "0.4.0").
-# Requires the CARGO_REGISTRY_TOKEN repository secret.
+# version in Cargo.toml exactly (tag v0.4.0 <-> version = "0.4.0") and point at
+# a commit on main. Requires the CARGO_REGISTRY_TOKEN repository secret.
 
 on:
   push:
@@ -17,7 +17,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Full history so the tagged commit can be checked against main.
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - name: Tag must match Cargo.toml version
         run: |
@@ -27,8 +32,25 @@ jobs:
             echo "Cargo.toml version $manifest does not match tag $GITHUB_REF_NAME" >&2
             exit 1
           fi
+      - name: Tagged commit must be on main
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Tag $GITHUB_REF_NAME ($GITHUB_SHA) is not on main" >&2
+            exit 1
+          fi
       - name: Test
         run: cargo test --all-features
+      # A publish cannot be undone, and canisters build for wasm32, so repeat
+      # the CI wasm checks here rather than trusting the tagged commit passed CI.
+      - name: Check core + storage + telemetry on wasm
+        run: cargo check --target wasm32-unknown-unknown --features storage,telemetry
+      - name: Check example canister (exercises the export macros)
+        run: cargo check --target wasm32-unknown-unknown
+        working-directory: examples/simple_counter/src/example_canister
+      - name: Check all features on wasm
+        run: cargo check --target wasm32-unknown-unknown --all-features
+        env:
+          RUSTFLAGS: --cfg getrandom_backend="custom"
       - name: Publish
         run: cargo publish --locked
         env:

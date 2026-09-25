@@ -409,8 +409,9 @@ See the [examples](./examples) directory for complete canister examples.
 1. Add a `## [x.y.z]` entry to `CHANGELOG.md` and set `version` in `Cargo.toml`.
    Under semver for 0.x, breaking changes bump the minor version.
 2. Commit, then `cargo publish --dry-run` to confirm the package builds.
-3. Push a tag `vx.y.z` on that commit. The release workflow checks the tag
-   matches `Cargo.toml` and runs `cargo publish` using the
+3. Push a tag `vx.y.z` on that commit once it is on `main`. The release
+   workflow checks the tag matches `Cargo.toml` and is on `main`, reruns the
+   native tests and wasm32 checks, and runs `cargo publish` using the
    `CARGO_REGISTRY_TOKEN` repository secret.
 
 ## License

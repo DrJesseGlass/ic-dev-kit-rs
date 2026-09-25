@@ -96,10 +96,10 @@ thread_local! {
         RefCell::new(HashMap::new());
 
     /// Per-owner byte cap. `None` disables the limit.
-    static MAX_BYTES_PER_OWNER: Cell<Option<usize>> = Cell::new(Some(DEFAULT_MAX_BYTES_PER_OWNER));
+    static MAX_BYTES_PER_OWNER: Cell<Option<usize>> = const { Cell::new(Some(DEFAULT_MAX_BYTES_PER_OWNER)) };
 
     /// Cap on bytes across all owners. `None` disables the limit.
-    static MAX_TOTAL_BYTES: Cell<Option<usize>> = Cell::new(Some(DEFAULT_MAX_TOTAL_BYTES));
+    static MAX_TOTAL_BYTES: Cell<Option<usize>> = const { Cell::new(Some(DEFAULT_MAX_TOTAL_BYTES)) };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -327,7 +327,9 @@ pub fn missing_chunks(owner: Principal, expected_count: u32) -> Vec<u32> {
     BUFFER_MAPS.with(|maps| {
         let maps = maps.borrow();
         match maps.get(&owner) {
-            Some(map) => (0..expected_count).filter(|i| !map.contains_key(i)).collect(),
+            Some(map) => (0..expected_count)
+                .filter(|i| !map.contains_key(i))
+                .collect(),
             None => (0..expected_count).collect(),
         }
     })
@@ -604,11 +606,7 @@ macro_rules! generate_upload_endpoints {
         // Parallel upload endpoints
         #[ic_cdk::update(guard = $guard)]
         pub fn append_parallel_chunk(chunk_id: u32, chunk: Vec<u8>) -> Result<usize, String> {
-            $crate::large_objects::append_parallel_chunk(
-                ic_cdk::api::msg_caller(),
-                chunk_id,
-                chunk,
-            )
+            $crate::large_objects::append_parallel_chunk(ic_cdk::api::msg_caller(), chunk_id, chunk)
         }
 
         #[ic_cdk::query]

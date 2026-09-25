@@ -9,23 +9,43 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  lint:
+    name: Format, clippy, docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: rustfmt
+        run: cargo fmt --check
+      - name: clippy (all features, all targets, warnings are errors)
+        run: cargo clippy --all-features --all-targets -- -D warnings
+      - name: rustdoc (broken intra-doc links are errors)
+        run: cargo doc --all-features --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
   test:
     name: Test (native)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Unit, integration, and doc tests
+      - name: No features
+        run: cargo test --no-default-features
+      - name: storage + telemetry
         run: cargo test --features storage,telemetry
-      - name: Check all features compile
-        run: cargo check --all-features
+      - name: All features (includes the ML modules)
+        run: cargo test --all-features
 
   wasm:
     name: Check (wasm32 canister target)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown

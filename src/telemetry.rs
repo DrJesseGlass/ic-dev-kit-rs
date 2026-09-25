@@ -59,7 +59,7 @@ thread_local! {
     /// Principals allowed to *view* monitoring data. Kept separate from the
     /// main [`auth`](crate::auth) allowlist so read-only observers do not
     /// become admins. Reuses [`Auth`] as the set type.
-    static MONITORING_AUTH: RefCell<Option<Auth>> = RefCell::new(None);
+    static MONITORING_AUTH: RefCell<Option<Auth>> = const { RefCell::new(None) };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -159,7 +159,10 @@ pub fn is_monitoring_admin() -> Result<(), String> {
         return Ok(());
     }
 
-    Err("Monitoring admin authorization failed: caller is not a controller or authorized admin".to_string())
+    Err(
+        "Monitoring admin authorization failed: caller is not a controller or authorized admin"
+            .to_string(),
+    )
 }
 
 /// Add a principal to the monitoring allowlist.
@@ -171,9 +174,9 @@ pub fn add_monitoring_principal(principal: Principal) {
 
 /// Remove a principal from the monitoring allowlist.
 ///
-/// Requires admin authorization. Unlike [`auth::remove_principal`]
-/// (crate::auth::remove_principal), emptying this list is allowed: controllers
-/// and admins can always view monitoring data.
+/// Requires admin authorization. Unlike
+/// [`auth::remove_principal`](crate::auth::remove_principal), emptying this
+/// list is allowed: controllers and admins can always view monitoring data.
 pub fn remove_monitoring_principal(principal: Principal) {
     with_monitoring_auth(|auth| auth.remove_principal(&principal));
 }
@@ -269,7 +272,8 @@ pub fn init_from_bytes(bytes: Option<Vec<u8>>) {
             canistergeek_ic_rust::monitor::PostUpgradeStableData,
             canistergeek_ic_rust::logger::PostUpgradeStableData,
             Vec<Principal>,
-        )>(&data) {
+        )>(&data)
+        {
             init_from_saved(Some(monitor_data), Some(logger_data), Some(principals));
             return;
         }
@@ -341,14 +345,20 @@ macro_rules! export_telemetry_endpoints {
         type __CgCanisterLogResponse =
             $crate::telemetry::canistergeek_ic_rust::api_type::CanisterLogResponse;
 
-        #[ic_cdk::query(name = "getCanistergeekInformation", guard = "is_monitoring_authorized")]
+        #[ic_cdk::query(
+            name = "getCanistergeekInformation",
+            guard = "is_monitoring_authorized"
+        )]
         fn get_canistergeek_information(
             request: __CgGetInformationRequest,
         ) -> __CgGetInformationResponse {
             $crate::telemetry::get_information(request)
         }
 
-        #[ic_cdk::update(name = "updateCanistergeekInformation", guard = "is_monitoring_authorized")]
+        #[ic_cdk::update(
+            name = "updateCanistergeekInformation",
+            guard = "is_monitoring_authorized"
+        )]
         fn update_canistergeek_information(request: __CgUpdateInformationRequest) {
             $crate::telemetry::canistergeek_ic_rust::update_information(request);
         }

@@ -114,9 +114,11 @@ pub fn save_candid<T: CandidType, R: StorageRegistry>(
 ) -> Result<(), String> {
     match Encode!(data) {
         Ok(serialized_bytes) => {
-            registry.borrow_mut().insert(key.to_string(), serialized_bytes);
+            registry
+                .borrow_mut()
+                .insert(key.to_string(), serialized_bytes);
             #[cfg(feature = "telemetry")]
-            crate::telemetry::log_info(&format!("Saved data to stable storage: {}", key));
+            crate::telemetry::log_info(format!("Saved data to stable storage: {}", key));
             Ok(())
         }
         Err(e) => {
@@ -150,54 +152,45 @@ pub fn save_candid<T: CandidType, R: StorageRegistry>(
 ///     storage::load_candid(reg, "my_key")
 /// });
 /// ```
-pub fn load_candid<T, R: StorageRegistry>(
-    registry: &RefCell<R>,
-    key: &str,
-) -> Option<T>
+pub fn load_candid<T, R: StorageRegistry>(registry: &RefCell<R>, key: &str) -> Option<T>
 where
     T: for<'de> candid::Deserialize<'de> + CandidType,
 {
-    registry.borrow().get(key).and_then(|serialized_bytes| {
-        match Decode!(&serialized_bytes, T) {
+    registry
+        .borrow()
+        .get(key)
+        .and_then(|serialized_bytes| match Decode!(&serialized_bytes, T) {
             Ok(data) => {
                 #[cfg(feature = "telemetry")]
-                crate::telemetry::log_info(&format!("Loaded data from stable storage: {}", key));
+                crate::telemetry::log_info(format!("Loaded data from stable storage: {}", key));
                 Some(data)
             }
             Err(_e) => {
                 #[cfg(feature = "telemetry")]
-                crate::telemetry::log_error(&format!(
+                crate::telemetry::log_error(format!(
                     "Failed to deserialize data for key {}: {:?}",
                     key, _e
                 ));
                 None
             }
-        }
-    })
+        })
 }
 
 /// Save raw bytes to storage.
 ///
 /// Use this for binary data that doesn't need Candid serialization.
-pub fn save_bytes<R: StorageRegistry>(
-    registry: &RefCell<R>,
-    key: &str,
-    bytes: Vec<u8>,
-) {
+pub fn save_bytes<R: StorageRegistry>(registry: &RefCell<R>, key: &str, bytes: Vec<u8>) {
     #[cfg(feature = "telemetry")]
     let size = bytes.len();
 
     registry.borrow_mut().insert(key.to_string(), bytes);
 
     #[cfg(feature = "telemetry")]
-    crate::telemetry::log_info(&format!("Saved {} bytes to stable storage: {}", size, key));
+    crate::telemetry::log_info(format!("Saved {} bytes to stable storage: {}", size, key));
 }
 
 /// Load raw bytes from storage.
-pub fn load_bytes<R: StorageRegistry>(
-    registry: &RefCell<R>,
-    key: &str,
-) -> Option<Vec<u8>> {
+pub fn load_bytes<R: StorageRegistry>(registry: &RefCell<R>, key: &str) -> Option<Vec<u8>> {
     registry.borrow().get(key)
 }
 
@@ -206,25 +199,19 @@ pub fn load_bytes<R: StorageRegistry>(
 /// # Returns
 ///
 /// `true` if the key existed and was removed.
-pub fn delete<R: StorageRegistry>(
-    registry: &RefCell<R>,
-    key: &str,
-) -> bool {
+pub fn delete<R: StorageRegistry>(registry: &RefCell<R>, key: &str) -> bool {
     let removed = registry.borrow_mut().remove(key).is_some();
 
     if removed {
         #[cfg(feature = "telemetry")]
-        crate::telemetry::log_info(&format!("Deleted from stable storage: {}", key));
+        crate::telemetry::log_info(format!("Deleted from stable storage: {}", key));
     }
 
     removed
 }
 
 /// Check if a key exists in storage without copying the value out.
-pub fn exists<R: StorageRegistry>(
-    registry: &RefCell<R>,
-    key: &str,
-) -> bool {
+pub fn exists<R: StorageRegistry>(registry: &RefCell<R>, key: &str) -> bool {
     registry.borrow().contains_key(key)
 }
 
@@ -236,10 +223,7 @@ pub fn exists<R: StorageRegistry>(
 /// # Returns
 ///
 /// `Some(size)` if the key exists, `None` otherwise.
-pub fn size<R: StorageRegistry>(
-    registry: &RefCell<R>,
-    key: &str,
-) -> Option<usize> {
+pub fn size<R: StorageRegistry>(registry: &RefCell<R>, key: &str) -> Option<usize> {
     registry.borrow().get(key).map(|bytes| bytes.len())
 }
 

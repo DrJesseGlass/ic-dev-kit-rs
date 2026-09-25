@@ -355,7 +355,10 @@ pub fn json_response(status_code: u16, body: String) -> HttpResponse {
 /// Response format: `{"error": "<message>"}`. The message is serialized with
 /// `serde_json`, so any string (including control characters) yields valid JSON.
 pub fn error_response(status_code: u16, error: &str) -> HttpResponse {
-    json_response(status_code, serde_json::json!({ "error": error }).to_string())
+    json_response(
+        status_code,
+        serde_json::json!({ "error": error }).to_string(),
+    )
 }
 
 /// Create a success response with JSON-serialized data.

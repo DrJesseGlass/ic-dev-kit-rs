@@ -99,6 +99,24 @@ direct `canistergeek_ic_rust` dependency. Contains breaking changes — see belo
   consolidation no longer discards the parallel buffer on its error path);
   `http::success_response` reuses `to_json`.
 
+### Dependencies and tooling
+
+- `thiserror` 1 → 2 for this crate's own error derives (`thiserror` 1 stays
+  in the graph via transitive dependencies). Minimum `ic-cdk` 0.20.3 and
+  `candid` 0.10.36.
+- Removed unused `async-trait` dependency and unused `tokio` dev-dependency.
+- The crate is built as `rlib` only; the consumer's canister is the `cdylib`.
+- `Cargo.lock` and the example's generated `.did` are now committed
+  (`.gitignore` no longer excludes them), so a fresh clone builds and deploys
+  reproducibly.
+- The example canister's path dependency no longer assumes the repository
+  directory is named `ic-dev-kit-rs`.
+- CI now enforces `cargo fmt --check`, `cargo clippy -D warnings` (all
+  features, all targets), and `cargo doc` with broken intra-doc links as
+  errors; runs the native test suite with no features, `storage,telemetry`,
+  and `--all-features` (the ML modules were previously only type-checked).
+  The codebase is rustfmt-formatted and clippy-clean to match.
+
 ## [0.3.0] - 2026-07-18
 
 Adds IC HTTP gateway callback streaming support to the `http` module. Contains

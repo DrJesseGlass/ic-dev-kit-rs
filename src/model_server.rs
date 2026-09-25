@@ -25,12 +25,12 @@
 
 #![cfg(all(feature = "text-generation", feature = "storage"))]
 
-use std::cell::RefCell;
+use crate::candle::*;
+use crate::storage::StorageRegistry;
+use crate::text_generation::*;
 use candid::CandidType;
 use serde::Deserialize;
-use crate::candle::*;
-use crate::text_generation::*;
-use crate::storage::StorageRegistry;
+use std::cell::RefCell;
 
 /// Generic model server for LLM inference.
 ///
@@ -136,12 +136,22 @@ impl<M: AutoregressiveModel> ModelServer<M> {
 
     /// Get the current token count (for multi-turn generation).
     pub fn token_count(&self) -> usize {
-        self.model.borrow().as_ref().map(|m| m.generated_token_count()).unwrap_or(0)
+        self.model
+            .borrow()
+            .as_ref()
+            .map(|m| m.generated_token_count())
+            .unwrap_or(0)
     }
 
     /// Get model metadata.
     pub fn metadata(&self) -> Option<ModelMetadata> {
         self.model.borrow().as_ref().map(|m| m.metadata())
+    }
+}
+
+impl<M: AutoregressiveModel> Default for ModelServer<M> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

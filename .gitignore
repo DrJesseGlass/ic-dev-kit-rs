@@ -2,7 +2,6 @@
 /target/
 **/*.rs.bk
 *.pdb
-Cargo.lock
 
 # IC
 .dfx/
@@ -23,7 +22,7 @@ Thumbs.db
 
 # Build artifacts
 *.wasm
-*.did
+# Generated Candid interfaces are committed (dfx.json points at the example's)
 
 # Logs
 *.log

@@ -39,11 +39,10 @@
 //! - [`candle`] - ML model traits (requires `candle` feature)
 //! - [`text_generation`] - LLM generation (requires `text-generation` feature)
 
-
 pub mod auth;
 pub mod http;
-pub mod large_objects;
 pub mod intercanister;
+pub mod large_objects;
 
 #[cfg(feature = "telemetry")]
 pub mod telemetry;
@@ -69,8 +68,8 @@ pub mod prelude {
         self, HttpError, HttpMethod, HttpRequest, HttpResponse, HttpResult, StreamingCallback,
         StreamingCallbackHttpResponse, StreamingCallbackToken, StreamingStrategy,
     };
-    pub use crate::large_objects;
     pub use crate::intercanister;
+    pub use crate::large_objects;
     pub use candid::Principal;
 
     #[cfg(feature = "telemetry")]
@@ -80,13 +79,12 @@ pub mod prelude {
     pub use crate::storage::{self, StorageRegistry};
 
     #[cfg(feature = "candle")]
-    pub use crate::candle::{self, CandleModel, ModelMetadata, ModelManager, gguf};
+    pub use crate::candle::{self, gguf, CandleModel, ModelManager, ModelMetadata};
 
     #[cfg(feature = "text-generation")]
     pub use crate::text_generation::{
-        self, AutoregressiveModel, GenerationConfig,
-        TokenizerHandle, GenerationResponse, StopReason,
-        generate_autoregressive, format_generation_stats, tokenizer,
+        self, format_generation_stats, generate_autoregressive, tokenizer, AutoregressiveModel,
+        GenerationConfig, GenerationResponse, StopReason, TokenizerHandle,
     };
 
     #[cfg(all(feature = "text-generation", feature = "storage"))]

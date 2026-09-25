@@ -176,7 +176,7 @@ impl Default for Auth {
 // ═══════════════════════════════════════════════════════════════
 
 thread_local! {
-    static AUTH: RefCell<Option<Auth>> = RefCell::new(None);
+    static AUTH: RefCell<Option<Auth>> = const { RefCell::new(None) };
 }
 
 /// Initialize the auth system with no authorized principals.
@@ -272,8 +272,7 @@ where
 /// }
 /// ```
 pub fn is_authorized() -> Result<(), String> {
-    with_auth(|auth| auth.check_authorized())?
-        .map_err(|e| format!("Authorization failed: {}", e))
+    with_auth(|auth| auth.check_authorized())?.map_err(|e| format!("Authorization failed: {}", e))
 }
 
 /// Add a principal to the authorized set.
@@ -334,8 +333,8 @@ pub fn save_to_bytes() -> Vec<u8> {
 ///
 /// Returns an error if deserialization fails or auth is not initialized.
 pub fn load_from_bytes(bytes: &[u8]) -> Result<(), String> {
-    let (principals,): (Vec<Principal>,) = candid::decode_args(bytes)
-        .map_err(|e| format!("Failed to decode principals: {:?}", e))?;
+    let (principals,): (Vec<Principal>,) =
+        candid::decode_args(bytes).map_err(|e| format!("Failed to decode principals: {:?}", e))?;
     with_auth(|auth| auth.set_principals(principals))
 }
 
@@ -402,7 +401,9 @@ macro_rules! export_auth_endpoints {
 
         #[ic_cdk::query(guard = "is_authorized")]
         fn get_authorized_count() -> usize {
-            $crate::auth::list_principals().map(|list| list.len()).unwrap_or(0)
+            $crate::auth::list_principals()
+                .map(|list| list.len())
+                .unwrap_or(0)
         }
     };
 }

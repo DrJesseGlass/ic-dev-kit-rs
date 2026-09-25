@@ -1,0 +1,123 @@
+type CanisterLogFeature = variant {
+  filterMessageByContains;
+  filterMessageByRegex;
+};
+type CanisterLogMessages = record {
+  data : vec LogMessageData;
+  lastAnalyzedMessageTimeNanos : opt nat64;
+};
+type CanisterLogMessagesInfo = record {
+  features : vec opt CanisterLogFeature;
+  lastTimeNanos : opt nat64;
+  count : nat32;
+  firstTimeNanos : opt nat64;
+};
+type CanisterLogRequest = variant {
+  getMessagesInfo;
+  getMessages : GetLogMessagesParameters;
+  getLatestMessages : GetLatestLogMessagesParameters;
+};
+type CanisterLogResponse = variant {
+  messagesInfo : CanisterLogMessagesInfo;
+  messages : CanisterLogMessages;
+};
+type CanisterMetrics = record { data : CanisterMetricsData };
+type CanisterMetricsData = variant {
+  hourly : vec HourlyMetricsData;
+  daily : vec DailyMetricsData;
+};
+type CollectMetricsRequestType = variant { force; normal };
+type DailyMetricsData = record {
+  updateCalls : nat64;
+  canisterHeapMemorySize : NumericEntity;
+  canisterCycles : NumericEntity;
+  canisterMemorySize : NumericEntity;
+  timeMillis : int;
+};
+type GetInformationRequest = record {
+  status : opt StatusRequest;
+  metrics : opt MetricsRequest;
+  logs : opt CanisterLogRequest;
+  version : bool;
+};
+type GetInformationResponse = record {
+  status : opt StatusResponse;
+  metrics : opt MetricsResponse;
+  logs : opt CanisterLogResponse;
+  version : opt nat;
+};
+type GetLatestLogMessagesParameters = record {
+  upToTimeNanos : opt nat64;
+  count : nat32;
+  filter : opt GetLogMessagesFilter;
+};
+type GetLogMessagesFilter = record {
+  analyzeCount : nat32;
+  messageRegex : opt text;
+  messageContains : opt text;
+};
+type GetLogMessagesParameters = record {
+  count : nat32;
+  filter : opt GetLogMessagesFilter;
+  fromTimeNanos : opt nat64;
+};
+type GetMetricsParameters = record {
+  dateToMillis : nat;
+  granularity : MetricsGranularity;
+  dateFromMillis : nat;
+};
+type HourlyMetricsData = record {
+  updateCalls : vec nat64;
+  canisterHeapMemorySize : vec nat64;
+  canisterCycles : vec nat64;
+  canisterMemorySize : vec nat64;
+  timeMillis : int;
+};
+type LogMessageData = record { timeNanos : nat64; message : text };
+type MetricsGranularity = variant { hourly; daily };
+type MetricsRequest = record { parameters : GetMetricsParameters };
+type MetricsResponse = record { metrics : opt CanisterMetrics };
+type NumericEntity = record {
+  avg : nat64;
+  max : nat64;
+  min : nat64;
+  first : nat64;
+  last : nat64;
+};
+type Result = variant { Ok; Err : text };
+type Result_1 = variant { Ok : text; Err : text };
+type StatusRequest = record {
+  memory_size : bool;
+  cycles : bool;
+  heap_memory_size : bool;
+};
+type StatusResponse = record {
+  memory_size : opt nat64;
+  cycles : opt nat64;
+  heap_memory_size : opt nat64;
+};
+type UpdateInformationRequest = record {
+  metrics : opt CollectMetricsRequestType;
+};
+service : () -> {
+  authorize_monitoring : (principal) -> ();
+  authorize_principal : (principal) -> (Result);
+  canister_status : () -> (text) query;
+  check_principal_authorized : (principal) -> (bool) query;
+  deauthorize_monitoring : (principal) -> ();
+  deauthorize_principal : (principal) -> (Result_1);
+  getCanisterLog : (CanisterLogRequest) -> (opt CanisterLogResponse) query;
+  getCanistergeekInformation : (GetInformationRequest) -> (
+      GetInformationResponse,
+    ) query;
+  get_authorized_count : () -> (nat64) query;
+  get_authorized_principals : () -> (vec principal) query;
+  get_counter : () -> (nat64) query;
+  get_message : (text) -> (opt text) query;
+  get_monitoring_principals : () -> (vec principal) query;
+  increment : () -> (nat64);
+  list_storage_keys : () -> (vec text) query;
+  reset_counter : () -> (text);
+  store_message : (text, text) -> (text);
+  updateCanistergeekInformation : (UpdateInformationRequest) -> ();
+}

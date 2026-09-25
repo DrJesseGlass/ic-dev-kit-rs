@@ -218,7 +218,10 @@ fn log_call_success(canister_id: Principal, method: &str) {
 }
 
 fn log_call_error(canister_id: Principal, method: &str, error: &CallFailed) {
-    log_message(&format!("✗ {}", format_call_error(canister_id, method, error)));
+    log_message(&format!(
+        "✗ {}",
+        format_call_error(canister_id, method, error)
+    ));
 }
 
 fn format_call_error(canister_id: Principal, method: &str, error: &CallFailed) -> String {

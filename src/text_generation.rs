@@ -23,9 +23,9 @@
 
 #![cfg(feature = "text-generation")]
 
+use crate::candle::CandleModel;
 use candid::CandidType;
 use serde::Deserialize;
-use crate::candle::CandleModel;
 
 // ═══════════════════════════════════════════════════════════════
 //  Autoregressive Model Traits (for LLMs)
@@ -90,10 +90,7 @@ pub trait AutoregressiveModel: CandleModel {
     /// # Returns
     ///
     /// The next token as text.
-    fn generate_next_token(
-        &mut self,
-        tokenizer: &dyn TokenizerHandle,
-    ) -> Result<String, String>;
+    fn generate_next_token(&mut self, tokenizer: &dyn TokenizerHandle) -> Result<String, String>;
 
     /// Check if generation is complete (EOS reached).
     fn is_generation_complete(&self) -> bool;

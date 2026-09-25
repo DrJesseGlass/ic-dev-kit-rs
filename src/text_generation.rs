@@ -152,13 +152,19 @@ impl Default for GenerationConfig {
 //  Generic Autoregressive Generation Function
 // ═══════════════════════════════════════════════════════════════
 
+/// Instruction budget per call for [`generate_autoregressive`].
+///
+/// The IC allows 40B instructions per update message; generation stops once
+/// this lower bound is crossed so the message can still return a response.
+pub const INSTRUCTION_LIMIT: u64 = 30_000_000_000;
+
 /// Generate text using any AutoregressiveModel implementation.
 ///
 /// This is a generic function that works with any model implementing
 /// the [`AutoregressiveModel`] trait. It handles:
-/// - Instruction limit monitoring (IC-specific, 30B limit)
-/// - Token limit enforcement
-/// - EOS detection
+/// - Instruction limit monitoring (see [`INSTRUCTION_LIMIT`])
+/// - Token limit enforcement (`max_tokens`; `0` generates nothing)
+/// - EOS detection (checked after every token, including the last)
 /// - Error handling
 ///
 /// # Arguments
@@ -189,47 +195,42 @@ pub fn generate_autoregressive<T: AutoregressiveModel>(
     config: &GenerationConfig,
 ) -> Result<GenerationResponse, String> {
     let start_instructions = ic_cdk::api::performance_counter(0);
+    let instructions_used = || ic_cdk::api::performance_counter(0) - start_instructions;
 
-    // Initialize with prompt and generate first token
-    let first_token = model.init_generation(prompt, tokenizer, config)?;
-    let mut generated_text = first_token;
-
-    // Generate remaining tokens
-    for _ in 1..config.max_tokens {
-        // Check if we hit EOS
-        if model.is_generation_complete() {
-            let instructions_used = ic_cdk::api::performance_counter(0) - start_instructions;
-            return Ok(GenerationResponse {
-                text: generated_text,
-                tokens_generated: model.generated_token_count(),
-                instructions_used,
-                stopped_reason: StopReason::EndOfSequence,
-            });
-        }
-
-        // Check instruction limit (30B for IC)
-        let instructions_so_far = ic_cdk::api::performance_counter(0) - start_instructions;
-        if instructions_so_far > 30_000_000_000 {
-            return Ok(GenerationResponse {
-                text: generated_text,
-                tokens_generated: model.generated_token_count(),
-                instructions_used: instructions_so_far,
-                stopped_reason: StopReason::InstructionLimit,
-            });
-        }
-
-        // Generate next token
-        let token_text = model.generate_next_token(tokenizer)?;
-        generated_text.push_str(&token_text);
+    if config.max_tokens == 0 {
+        return Ok(GenerationResponse {
+            text: String::new(),
+            tokens_generated: 0,
+            instructions_used: instructions_used(),
+            stopped_reason: StopReason::MaxTokens,
+        });
     }
 
-    // Hit max tokens
-    let instructions_used = ic_cdk::api::performance_counter(0) - start_instructions;
+    // Initialize with prompt and generate first token
+    let mut generated_text = model.init_generation(prompt, tokenizer, config)?;
+    let mut tokens_generated = 1;
+
+    let stopped_reason = loop {
+        // EOS is checked after every generated token, including the last.
+        if model.is_generation_complete() {
+            break StopReason::EndOfSequence;
+        }
+        if tokens_generated >= config.max_tokens {
+            break StopReason::MaxTokens;
+        }
+        if instructions_used() > INSTRUCTION_LIMIT {
+            break StopReason::InstructionLimit;
+        }
+
+        generated_text.push_str(&model.generate_next_token(tokenizer)?);
+        tokens_generated += 1;
+    };
+
     Ok(GenerationResponse {
         text: generated_text,
         tokens_generated: model.generated_token_count(),
-        instructions_used,
-        stopped_reason: StopReason::MaxTokens,
+        instructions_used: instructions_used(),
+        stopped_reason,
     })
 }
 
@@ -301,16 +302,14 @@ pub mod tokenizers {
     /// - `</s>` (Llama-style)
     /// - `<eos>` (Generic)
     ///
-    /// Returns 0 if no known EOS token is found.
-    pub fn find_eos_token(tokenizer: &Tokenizer) -> u32 {
+    /// Returns `None` if no known EOS token is found. (Token id 0 is a real
+    /// token in most vocabularies, so it is not used as a sentinel.)
+    pub fn find_eos_token(tokenizer: &Tokenizer) -> Option<u32> {
         let vocab = tokenizer.get_vocab(true);
 
-        vocab.get("<|endoftext|>")
-            .or_else(|| vocab.get("<|im_end|>"))
-            .or_else(|| vocab.get("</s>"))
-            .or_else(|| vocab.get("<eos>"))
-            .copied()
-            .unwrap_or(0)
+        ["<|endoftext|>", "<|im_end|>", "</s>", "<eos>"]
+            .iter()
+            .find_map(|name| vocab.get(*name).copied())
     }
 }
 

@@ -39,6 +39,13 @@
 
 #![cfg(feature = "telemetry")]
 
+/// Re-export of the underlying Canistergeek crate.
+///
+/// [`export_telemetry_endpoints!`](crate::export_telemetry_endpoints) refers
+/// to its types through this path, so consumers do not need a direct
+/// dependency on `canistergeek_ic_rust`.
+pub use canistergeek_ic_rust;
+
 use candid::Principal;
 use canistergeek_ic_rust::api_type::*;
 use ic_cdk;
@@ -405,6 +412,11 @@ pub fn save_principals_to_bytes() -> Vec<u8> {
 /// and in any order. Pass `admin_guard = "my_guard"` to use your own guard
 /// function for the administration endpoints instead.
 ///
+/// The Canistergeek request/response types are referenced through
+/// [`telemetry::canistergeek_ic_rust`](crate::telemetry::canistergeek_ic_rust),
+/// so consumers do not need their own dependency on that crate. Invoke
+/// `ic_cdk::export_candid!()` in the same module as this macro.
+///
 /// # Example
 ///
 /// ```rust,ignore
@@ -427,40 +439,53 @@ macro_rules! export_telemetry_endpoints {
             $crate::telemetry::is_monitoring_authorized()
         }
 
+        // `ic_cdk::export_candid!` re-parses stringified endpoint signatures,
+        // and `$crate` is not parseable there, so the Canistergeek types are
+        // bound to local aliases first. Invoke `export_candid!` in the same
+        // module as this macro so the aliases are in scope.
+        type __CgGetInformationRequest =
+            $crate::telemetry::canistergeek_ic_rust::api_type::GetInformationRequest;
+        type __CgGetInformationResponse =
+            $crate::telemetry::canistergeek_ic_rust::api_type::GetInformationResponse;
+        type __CgUpdateInformationRequest =
+            $crate::telemetry::canistergeek_ic_rust::api_type::UpdateInformationRequest;
+        type __CgCanisterLogRequest =
+            $crate::telemetry::canistergeek_ic_rust::api_type::CanisterLogRequest;
+        type __CgCanisterLogResponse =
+            $crate::telemetry::canistergeek_ic_rust::api_type::CanisterLogResponse;
+
         #[ic_cdk::query(name = "getCanistergeekInformation", guard = "is_monitoring_authorized")]
         fn get_canistergeek_information(
-            request: canistergeek_ic_rust::api_type::GetInformationRequest
-        ) -> canistergeek_ic_rust::api_type::GetInformationResponse {
+            request: __CgGetInformationRequest,
+        ) -> __CgGetInformationResponse {
             $crate::telemetry::get_information(request)
         }
 
         #[ic_cdk::update(name = "updateCanistergeekInformation", guard = "is_monitoring_authorized")]
-        fn update_canistergeek_information(
-            request: canistergeek_ic_rust::api_type::UpdateInformationRequest
-        ) {
-            canistergeek_ic_rust::update_information(request);
+        fn update_canistergeek_information(request: __CgUpdateInformationRequest) {
+            $crate::telemetry::canistergeek_ic_rust::update_information(request);
         }
 
         #[ic_cdk::query(name = "getCanisterLog", guard = "is_monitoring_authorized")]
         fn get_canister_log_messages(
-            request: canistergeek_ic_rust::api_type::CanisterLogRequest
-        ) -> Option<canistergeek_ic_rust::api_type::CanisterLogResponse> {
+            request: __CgCanisterLogRequest,
+        ) -> Option<__CgCanisterLogResponse> {
             $crate::telemetry::get_canister_log(request)
         }
 
         // Keep monitoring auth endpoints in snake_case (our own API)
         #[ic_cdk::update(guard = $admin_guard)]
-        fn authorize_monitoring(principal: candid::Principal) {
+        fn authorize_monitoring(principal: ::candid::Principal) {
             $crate::telemetry::add_monitoring_principal(principal);
         }
 
         #[ic_cdk::update(guard = $admin_guard)]
-        fn deauthorize_monitoring(principal: candid::Principal) {
+        fn deauthorize_monitoring(principal: ::candid::Principal) {
             $crate::telemetry::remove_monitoring_principal(principal);
         }
 
         #[ic_cdk::query(guard = "is_monitoring_authorized")]
-        fn get_monitoring_principals() -> Vec<candid::Principal> {
+        fn get_monitoring_principals() -> Vec<::candid::Principal> {
             $crate::telemetry::list_monitoring_principals()
         }
     };

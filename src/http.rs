@@ -346,12 +346,10 @@ pub fn json_response(status_code: u16, body: String) -> HttpResponse {
 
 /// Create an error response with JSON body.
 ///
-/// Response format: `{"error": "<message>"}`
+/// Response format: `{"error": "<message>"}`. The message is serialized with
+/// `serde_json`, so any string (including control characters) yields valid JSON.
 pub fn error_response(status_code: u16, error: &str) -> HttpResponse {
-    json_response(
-        status_code,
-        format!(r#"{{"error":"{}"}}"#, escape_json(error)),
-    )
+    json_response(status_code, serde_json::json!({ "error": error }).to_string())
 }
 
 /// Create a success response with JSON-serialized data.
@@ -394,15 +392,6 @@ pub fn cors_preflight_response() -> HttpResponse {
         ],
         vec![],
     )
-}
-
-/// Escape special characters in a JSON string.
-fn escape_json(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -702,6 +691,10 @@ pub type HandlerFn = fn(HttpRequest) -> HttpResult<HttpResponse>;
 
 /// Simple HTTP router with pattern matching.
 ///
+/// Routes are matched in two passes: an exact path match first, then pattern
+/// routes in the order they were registered. Register more specific patterns
+/// before broader ones.
+///
 /// # Example
 ///
 /// ```rust,ignore
@@ -712,20 +705,29 @@ pub type HandlerFn = fn(HttpRequest) -> HttpResult<HttpResponse>;
 /// let response = router.handle(request);
 /// ```
 pub struct Router {
-    routes: HashMap<(HttpMethod, String), HandlerFn>,
+    routes: Vec<(HttpMethod, String, HandlerFn)>,
 }
 
 impl Router {
     /// Create a new empty router.
     pub fn new() -> Self {
-        Self {
-            routes: HashMap::new(),
-        }
+        Self { routes: Vec::new() }
     }
 
     /// Add a route with a specific method.
+    ///
+    /// Registering the same method and path again replaces the earlier handler
+    /// but keeps its position in the match order.
     pub fn add_route(&mut self, method: HttpMethod, path: impl Into<String>, handler: HandlerFn) {
-        self.routes.insert((method, path.into()), handler);
+        let path = path.into();
+        match self
+            .routes
+            .iter_mut()
+            .find(|(m, p, _)| *m == method && *p == path)
+        {
+            Some(existing) => existing.2 = handler,
+            None => self.routes.push((method, path, handler)),
+        }
     }
 
     /// Add a GET route.
@@ -763,20 +765,18 @@ impl Router {
         };
 
         let path = extract_path(&request.url);
+        let for_method = || self.routes.iter().filter(|(m, _, _)| *m == method);
 
-        // Try exact match first
-        if let Some(handler) = self.routes.get(&(method.clone(), path.to_string())) {
-            return handler(request).unwrap_or_else(|e| e.to_response());
+        // Exact match first, then patterns in registration order.
+        let handler = for_method()
+            .find(|(_, route_path, _)| route_path == path)
+            .or_else(|| for_method().find(|(_, route_path, _)| matches_pattern(path, route_path)))
+            .map(|(_, _, handler)| *handler);
+
+        match handler {
+            Some(handler) => handler(request).unwrap_or_else(|e| e.to_response()),
+            None => HttpError::NotFound.to_response(),
         }
-
-        // Try pattern matching
-        for ((route_method, route_path), handler) in &self.routes {
-            if route_method == &method && matches_pattern(path, route_path) {
-                return handler(request).unwrap_or_else(|e| e.to_response());
-            }
-        }
-
-        HttpError::NotFound.to_response()
     }
 }
 
@@ -890,6 +890,57 @@ mod tests {
             Some("Bearer token123")
         );
         assert_eq!(get_header(&headers, "Missing"), None);
+    }
+
+    #[test]
+    fn test_error_response_is_valid_json_for_any_message() {
+        let nasty = "quote\" backslash\\ newline\n tab\t nul\u{0} bell\u{7}";
+        let response = error_response(400, nasty);
+        let parsed: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(parsed["error"], nasty);
+    }
+
+    fn request(method: &str, url: &str) -> HttpRequest {
+        HttpRequest {
+            method: method.to_string(),
+            url: url.to_string(),
+            headers: vec![],
+            body: vec![],
+        }
+    }
+
+    fn handler_a(_: HttpRequest) -> HttpResult<HttpResponse> {
+        Ok(json_response(200, "a".to_string()))
+    }
+
+    fn handler_b(_: HttpRequest) -> HttpResult<HttpResponse> {
+        Ok(json_response(200, "b".to_string()))
+    }
+
+    #[test]
+    fn test_router_pattern_precedence_is_registration_order() {
+        let mut router = Router::new();
+        router.get("/api/:id", handler_a);
+        router.get("/api/*", handler_b);
+        assert_eq!(router.handle(request("GET", "/api/x")).body, b"a");
+
+        let mut router = Router::new();
+        router.get("/api/*", handler_b);
+        router.get("/api/:id", handler_a);
+        assert_eq!(router.handle(request("GET", "/api/x")).body, b"b");
+    }
+
+    #[test]
+    fn test_router_exact_match_beats_pattern_and_replaces_in_place() {
+        let mut router = Router::new();
+        router.get("/api/*", handler_b);
+        router.get("/api/x", handler_a);
+        assert_eq!(router.handle(request("GET", "/api/x")).body, b"a");
+        assert_eq!(router.handle(request("GET", "/api/y")).body, b"b");
+        assert_eq!(router.handle(request("POST", "/api/x")).status_code, 404);
+
+        router.get("/api/x", handler_b);
+        assert_eq!(router.handle(request("GET", "/api/x")).body, b"b");
     }
 
     #[test]

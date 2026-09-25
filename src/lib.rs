@@ -90,5 +90,5 @@ pub mod prelude {
     };
 
     #[cfg(all(feature = "text-generation", feature = "storage"))]
-    pub use crate::model_server::{ModelServer, EmptyResult, InferenceRequest, InferenceResponse, ModelInfo};
+    pub use crate::model_server::{InferenceRequest, InferenceResponse, ModelInfo, ModelServer};
 }

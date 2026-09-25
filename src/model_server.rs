@@ -149,15 +149,6 @@ impl<M: AutoregressiveModel> ModelServer<M> {
 //  Response Types
 // ═══════════════════════════════════════════════════════════════
 
-/// Simple result type for endpoints with no return value.
-#[derive(CandidType, Deserialize)]
-pub enum EmptyResult {
-    /// Success.
-    Ok,
-    /// Error with message.
-    Err(String),
-}
-
 /// Request for inference.
 #[derive(CandidType, Deserialize)]
 pub struct InferenceRequest {
@@ -180,6 +171,19 @@ pub struct InferenceResponse {
     pub success: bool,
     /// Error message if failed.
     pub error: Option<String>,
+}
+
+impl InferenceResponse {
+    /// A failed inference: empty output with `success: false` and the error.
+    pub fn failure(error: impl Into<String>) -> Self {
+        Self {
+            generated_text: String::new(),
+            tokens_generated: 0,
+            instructions_used: 0,
+            success: false,
+            error: Some(error.into()),
+        }
+    }
 }
 
 impl From<GenerationResponse> for InferenceResponse {
@@ -213,10 +217,15 @@ pub struct ModelInfo {
 ///
 /// This macro creates the following endpoints:
 /// - `setup_model` - Load model from storage (admin only)
-/// - `generate` - Run inference (public)
+/// - `generate` - Run inference (guarded by `generate_guard`; public if omitted)
 /// - `reset_generation` - Reset model state (admin only)
 /// - `is_model_loaded` - Check if model is ready (public)
 /// - `get_model_info` - Get model information (public)
+///
+/// Admin endpoints are guarded by
+/// [`auth::is_authorized`](crate::auth::is_authorized) via a locally defined
+/// `__model_admin_guard` function, so the macro works regardless of how the
+/// crate is renamed in `Cargo.toml`.
 ///
 /// # Arguments
 ///
@@ -225,6 +234,9 @@ pub struct ModelInfo {
 /// * `weights_key` - Storage key for model weights
 /// * `tokenizer_key` - Storage key for tokenizer
 /// * `get_tokenizer` - Function to extract tokenizer from model
+/// * `generate_guard` - Optional guard function name (as a string) for the
+///   `generate` endpoint. **Omitting it makes inference public**: any caller
+///   can then burn up to the per-message instruction limit on your cycles.
 ///
 /// # Example
 ///
@@ -239,7 +251,8 @@ pub struct ModelInfo {
 ///     registry: REGISTRIES,
 ///     weights_key: "model_weights",
 ///     tokenizer_key: "tokenizer",
-///     get_tokenizer: |model| Box::new(model.get_tokenizer())
+///     get_tokenizer: |model| Box::new(model.get_tokenizer()),
+///     generate_guard: "is_authorized"
 /// );
 /// ```
 #[macro_export]
@@ -249,64 +262,76 @@ macro_rules! generate_model_endpoints {
         registry: $registry:expr,
         weights_key: $weights_key:expr,
         tokenizer_key: $tokenizer_key:expr,
-        get_tokenizer: $get_tokenizer:expr
+        get_tokenizer: $get_tokenizer:expr $(,)?
     ) => {
-        use $crate::model_server::{EmptyResult, InferenceRequest, InferenceResponse, ModelInfo};
+        fn __allow_all_generate() -> Result<(), String> {
+            Ok(())
+        }
 
-        #[ic_cdk::update(guard = "ic_dev_kit_rs::auth::is_authorized")]
-        pub fn setup_model() -> EmptyResult {
+        $crate::generate_model_endpoints!(
+            server: $server,
+            registry: $registry,
+            weights_key: $weights_key,
+            tokenizer_key: $tokenizer_key,
+            get_tokenizer: $get_tokenizer,
+            generate_guard: "__allow_all_generate"
+        );
+    };
+
+    (
+        server: $server:expr,
+        registry: $registry:expr,
+        weights_key: $weights_key:expr,
+        tokenizer_key: $tokenizer_key:expr,
+        get_tokenizer: $get_tokenizer:expr,
+        generate_guard: $generate_guard:expr $(,)?
+    ) => {
+        fn __model_admin_guard() -> Result<(), String> {
+            $crate::auth::is_authorized()
+        }
+
+        #[ic_cdk::update(guard = "__model_admin_guard")]
+        pub fn setup_model() -> Result<(), String> {
             #[cfg(feature = "telemetry")]
             $crate::telemetry::collect_metrics();
 
-            match $server.with(|s| {
+            let result = $server.with(|s| {
                 $registry.with(|r| {
                     s.setup_from_storage(r, $weights_key, $tokenizer_key, $get_tokenizer)
                 })
-            }) {
-                Ok(_) => {
-                    #[cfg(feature = "telemetry")]
-                    $crate::telemetry::log_info("Model loaded");
-                    EmptyResult::Ok
-                }
-                Err(e) => {
-                    #[cfg(feature = "telemetry")]
-                    $crate::telemetry::log_error(&format!("Load failed: {}", e));
-                    EmptyResult::Err(e)
-                }
+            });
+
+            #[cfg(feature = "telemetry")]
+            match &result {
+                Ok(()) => $crate::telemetry::log_info("Model loaded"),
+                Err(e) => $crate::telemetry::log_error(format!("Load failed: {}", e)),
             }
+
+            result
         }
 
-        #[ic_cdk::update]
-        pub fn generate(request: InferenceRequest) -> InferenceResponse {
+        #[ic_cdk::update(guard = $generate_guard)]
+        pub fn generate(
+            request: $crate::model_server::InferenceRequest,
+        ) -> $crate::model_server::InferenceResponse {
             #[cfg(feature = "telemetry")]
             $crate::telemetry::collect_metrics();
 
             let config = request.config.unwrap_or_default();
 
-            $server.with(|s| {
-                match s.generate(request.prompt, &config) {
-                    Ok(response) => response.into(),
-                    Err(e) => {
-                        #[cfg(feature = "telemetry")]
-                        $crate::telemetry::log_error(&format!("Generation failed: {}", e));
-                        InferenceResponse {
-                            generated_text: String::new(),
-                            tokens_generated: 0,
-                            instructions_used: 0,
-                            success: false,
-                            error: Some(e),
-                        }
-                    }
+            $server.with(|s| match s.generate(request.prompt, &config) {
+                Ok(response) => response.into(),
+                Err(e) => {
+                    #[cfg(feature = "telemetry")]
+                    $crate::telemetry::log_error(format!("Generation failed: {}", e));
+                    $crate::model_server::InferenceResponse::failure(e)
                 }
             })
         }
 
-        #[ic_cdk::update(guard = "ic_dev_kit_rs::auth::is_authorized")]
-        pub fn reset_generation() -> EmptyResult {
-            $server.with(|s| match s.reset() {
-                Ok(_) => EmptyResult::Ok,
-                Err(e) => EmptyResult::Err(e),
-            })
+        #[ic_cdk::update(guard = "__model_admin_guard")]
+        pub fn reset_generation() -> Result<(), String> {
+            $server.with(|s| s.reset())
         }
 
         #[ic_cdk::query]
@@ -315,8 +340,8 @@ macro_rules! generate_model_endpoints {
         }
 
         #[ic_cdk::query]
-        pub fn get_model_info() -> ModelInfo {
-            $server.with(|s| ModelInfo {
+        pub fn get_model_info() -> $crate::model_server::ModelInfo {
+            $server.with(|s| $crate::model_server::ModelInfo {
                 loaded: s.is_loaded(),
                 current_tokens: s.token_count(),
                 metadata: s.metadata(),

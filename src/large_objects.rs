@@ -12,7 +12,10 @@
 //!
 //! Each owner's total buffered bytes (sequential + parallel combined) is
 //! capped at [`DEFAULT_MAX_BYTES_PER_OWNER`] by default; adjust with
-//! [`set_max_bytes_per_owner`].
+//! [`set_max_bytes_per_owner`]. Because anyone can mint fresh principals, a
+//! per-owner cap alone cannot protect the heap, so the total across all owners
+//! is also capped at [`DEFAULT_MAX_TOTAL_BYTES`]; adjust with
+//! [`set_max_total_bytes`].
 //!
 //! **Note:** buffers live on the Wasm heap, not in stable memory. An in-flight
 //! upload is lost on canister upgrade — finalize uploads (e.g. save to a
@@ -65,11 +68,20 @@ use candid::Principal;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
-/// Default cap on total buffered bytes per owner: 2 GiB.
+/// Default cap on total buffered bytes per owner: 1 GiB.
 ///
-/// The IC Wasm heap is limited to 4 GiB, so a single runaway uploader cannot
-/// take the canister down by default. Adjust with [`set_max_bytes_per_owner`].
-pub const DEFAULT_MAX_BYTES_PER_OWNER: usize = 2 * 1024 * 1024 * 1024;
+/// The sequential buffer is a single `Vec<u8>`, and `Vec` growth doubles its
+/// capacity, so a buffer approaching half the 4 GiB Wasm heap cannot grow
+/// further without trapping. 1 GiB keeps the worst-case reallocation (copying
+/// into a 2 GiB allocation) inside the heap. Adjust with
+/// [`set_max_bytes_per_owner`].
+pub const DEFAULT_MAX_BYTES_PER_OWNER: usize = 1024 * 1024 * 1024;
+
+/// Default cap on buffered bytes summed across all owners: 2 GiB.
+///
+/// Leaves headroom on the 4 GiB heap for the canister's own state and for
+/// consolidation copies. Adjust with [`set_max_total_bytes`].
+pub const DEFAULT_MAX_TOTAL_BYTES: usize = 2 * 1024 * 1024 * 1024;
 
 // ═══════════════════════════════════════════════════════════════
 //  Thread-Local Buffers (keyed by owner principal)
@@ -85,6 +97,9 @@ thread_local! {
 
     /// Per-owner byte cap. `None` disables the limit.
     static MAX_BYTES_PER_OWNER: Cell<Option<usize>> = Cell::new(Some(DEFAULT_MAX_BYTES_PER_OWNER));
+
+    /// Cap on bytes across all owners. `None` disables the limit.
+    static MAX_TOTAL_BYTES: Cell<Option<usize>> = Cell::new(Some(DEFAULT_MAX_TOTAL_BYTES));
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -103,20 +118,57 @@ pub fn max_bytes_per_owner() -> Option<usize> {
     MAX_BYTES_PER_OWNER.with(|m| m.get())
 }
 
+/// Set the cap on buffered bytes summed across all owners.
+///
+/// Pass `None` to disable the limit entirely.
+pub fn set_max_total_bytes(limit: Option<usize>) {
+    MAX_TOTAL_BYTES.with(|m| m.set(limit));
+}
+
+/// Get the current cap across all owners (`None` = unlimited).
+pub fn max_total_bytes() -> Option<usize> {
+    MAX_TOTAL_BYTES.with(|m| m.get())
+}
+
 /// Total bytes currently buffered for an owner (sequential + parallel).
 pub fn total_buffered_bytes(owner: Principal) -> usize {
     buffer_size(owner) + parallel_buffer_size(owner)
 }
 
-/// Enforce the per-owner cap given the owner's current usage and the bytes
-/// about to be added. Callers pass `current` excluding anything the write
-/// replaces.
-fn check_capacity(current: usize, incoming: usize) -> Result<(), String> {
+/// Total bytes currently buffered across all owners.
+pub fn total_buffered_bytes_all_owners() -> usize {
+    let sequential: usize = BUFFERS.with(|b| b.borrow().values().map(Vec::len).sum());
+    let parallel: usize = BUFFER_MAPS.with(|maps| {
+        maps.borrow()
+            .values()
+            .flat_map(HashMap::values)
+            .map(Vec::len)
+            .sum()
+    });
+    sequential + parallel
+}
+
+/// Enforce both caps for a write that adds `incoming` net bytes to `owner`.
+///
+/// `owner_current` is the owner's usage excluding anything the write replaces;
+/// the global total is measured here, and the same replaced bytes are
+/// subtracted from it via `replaced`. Must be called before taking a mutable
+/// borrow on the buffer maps.
+fn check_capacity(owner_current: usize, replaced: usize, incoming: usize) -> Result<(), String> {
     if let Some(limit) = max_bytes_per_owner() {
-        if current.saturating_add(incoming) > limit {
+        if owner_current.saturating_add(incoming) > limit {
             return Err(format!(
-                "Upload buffer limit exceeded: {} buffered + {} incoming > {} byte cap",
-                current, incoming, limit
+                "Upload buffer limit exceeded: {} buffered + {} incoming > {} byte per-owner cap",
+                owner_current, incoming, limit
+            ));
+        }
+    }
+    if let Some(limit) = max_total_bytes() {
+        let total = total_buffered_bytes_all_owners().saturating_sub(replaced);
+        if total.saturating_add(incoming) > limit {
+            return Err(format!(
+                "Upload buffer limit exceeded: {} buffered across all owners + {} incoming > {} byte total cap",
+                total, incoming, limit
             ));
         }
     }
@@ -133,14 +185,16 @@ fn check_capacity(current: usize, incoming: usize) -> Result<(), String> {
 ///
 /// # Returns
 ///
-/// The new buffer size in bytes, or an error if the per-owner cap would be
-/// exceeded.
+/// The new buffer size in bytes, or an error if a cap would be exceeded.
 pub fn append_chunk(owner: Principal, chunk: Vec<u8>) -> Result<usize, String> {
-    let parallel_bytes = parallel_buffer_size(owner);
+    if chunk.is_empty() {
+        // Nothing to add; avoid creating an empty entry for the owner.
+        return Ok(buffer_size(owner));
+    }
+    check_capacity(total_buffered_bytes(owner), 0, chunk.len())?;
     BUFFERS.with(|buffers| {
         let mut buffers = buffers.borrow_mut();
         let buffer = buffers.entry(owner).or_default();
-        check_capacity(buffer.len() + parallel_bytes, chunk.len())?;
         buffer.extend(chunk);
         Ok(buffer.len())
     })
@@ -169,10 +223,10 @@ pub fn get_buffer_data(owner: Principal) -> Vec<u8> {
 ///
 /// # Errors
 ///
-/// Returns an error if the data alone exceeds the per-owner cap.
+/// Returns an error if the data would exceed a cap.
 pub fn load_to_buffer(owner: Principal, data: Vec<u8>) -> Result<(), String> {
     // Replaces the sequential buffer, so only parallel bytes count as current.
-    check_capacity(parallel_buffer_size(owner), data.len())?;
+    check_capacity(parallel_buffer_size(owner), buffer_size(owner), data.len())?;
     BUFFERS.with(|buffers| {
         buffers.borrow_mut().insert(owner, data);
     });
@@ -197,24 +251,28 @@ pub fn load_to_buffer(owner: Principal, data: Vec<u8>) -> Result<(), String> {
 ///
 /// # Returns
 ///
-/// The number of chunks now buffered for this owner, or an error if the
-/// per-owner cap would be exceeded.
+/// The number of chunks now buffered for this owner, or an error if a cap
+/// would be exceeded.
 pub fn append_parallel_chunk(
     owner: Principal,
     chunk_id: u32,
     chunk: Vec<u8>,
 ) -> Result<usize, String> {
-    let sequential_bytes = buffer_size(owner);
+    // A replaced chunk frees its old bytes, so only the delta counts.
+    let replaced = BUFFER_MAPS.with(|maps| {
+        maps.borrow()
+            .get(&owner)
+            .and_then(|m| m.get(&chunk_id))
+            .map_or(0, Vec::len)
+    });
+    check_capacity(
+        total_buffered_bytes(owner) - replaced,
+        replaced,
+        chunk.len(),
+    )?;
     BUFFER_MAPS.with(|maps| {
         let mut maps = maps.borrow_mut();
         let map = maps.entry(owner).or_default();
-        // A replaced chunk frees its old bytes, so only count the delta.
-        let replaced = map.get(&chunk_id).map(Vec::len).unwrap_or(0);
-        let parallel_bytes: usize = map.values().map(Vec::len).sum();
-        check_capacity(
-            sequential_bytes + parallel_bytes,
-            chunk.len().saturating_sub(replaced),
-        )?;
         map.insert(chunk_id, chunk);
         Ok(map.len())
     })
@@ -357,10 +415,15 @@ pub fn clear_parallel_chunks(owner: Principal) {
 /// `true` if the chunk was present and removed.
 pub fn remove_parallel_chunk(owner: Principal, chunk_id: u32) -> bool {
     BUFFER_MAPS.with(|maps| {
-        maps.borrow_mut()
-            .get_mut(&owner)
-            .and_then(|m| m.remove(&chunk_id))
-            .is_some()
+        let mut maps = maps.borrow_mut();
+        let Some(map) = maps.get_mut(&owner) else {
+            return false;
+        };
+        let removed = map.remove(&chunk_id).is_some();
+        if map.is_empty() {
+            maps.remove(&owner);
+        }
+        removed
     })
 }
 
@@ -455,7 +518,8 @@ impl std::fmt::Display for StorageStatus {
 /// - `clear_parallel_chunks()`
 /// - `parallel_chunk_count() -> usize`
 ///
-/// **Storage (if registry provided):**
+/// **Storage (if registry provided; all guarded, since they expose arbitrary
+/// keys in the registry):**
 /// - `save_buffer_to_storage(key: String) -> Result<String, String>`
 /// - `save_parallel_to_storage(key: String) -> Result<String, String>`
 /// - `storage_key_exists(key: String) -> bool`
@@ -508,12 +572,12 @@ macro_rules! generate_upload_endpoints {
             Ok(format!("Saved {} bytes to key '{}'", size, key))
         }
 
-        #[ic_cdk::query]
+        #[ic_cdk::query(guard = $guard)]
         pub fn storage_key_exists(key: String) -> bool {
             $registry.with(|r| $crate::storage::exists(r, &key))
         }
 
-        #[ic_cdk::query]
+        #[ic_cdk::query(guard = $guard)]
         pub fn get_storage_size(key: String) -> Option<usize> {
             $registry.with(|r| $crate::storage::size(r, &key))
         }
@@ -685,5 +749,46 @@ mod tests {
         set_max_bytes_per_owner(Some(DEFAULT_MAX_BYTES_PER_OWNER));
         clear_buffer(owner);
         clear_parallel_chunks(owner);
+    }
+
+    #[test]
+    fn test_total_cap_spans_owners() {
+        let (a, b) = (owner_a(), owner_b());
+        clear_buffer(a);
+        clear_buffer(b);
+        clear_parallel_chunks(a);
+        clear_parallel_chunks(b);
+
+        set_max_bytes_per_owner(None);
+        set_max_total_bytes(Some(5));
+
+        append_chunk(a, vec![0; 3]).unwrap();
+        // Owner B is under any per-owner cap but pushes the total past 5.
+        assert!(append_chunk(b, vec![0; 3]).is_err());
+        append_parallel_chunk(b, 0, vec![0; 2]).unwrap();
+        assert_eq!(total_buffered_bytes_all_owners(), 5);
+        // Replacing a parallel chunk with one of equal size is a zero delta.
+        append_parallel_chunk(b, 0, vec![1; 2]).unwrap();
+        // Replacing the sequential buffer counts only the delta too.
+        load_to_buffer(a, vec![0; 3]).unwrap();
+        assert!(load_to_buffer(a, vec![0; 4]).is_err());
+
+        set_max_total_bytes(Some(DEFAULT_MAX_TOTAL_BYTES));
+        set_max_bytes_per_owner(Some(DEFAULT_MAX_BYTES_PER_OWNER));
+        clear_buffer(a);
+        clear_buffer(b);
+        clear_parallel_chunks(b);
+    }
+
+    #[test]
+    fn test_empty_writes_do_not_leak_entries() {
+        let owner = Principal::from_slice(&[7, 7]);
+        append_chunk(owner, vec![]).unwrap();
+        assert!(BUFFERS.with(|b| !b.borrow().contains_key(&owner)));
+
+        append_parallel_chunk(owner, 0, vec![1]).unwrap();
+        assert!(remove_parallel_chunk(owner, 0));
+        assert!(!remove_parallel_chunk(owner, 0));
+        assert!(BUFFER_MAPS.with(|m| !m.borrow().contains_key(&owner)));
     }
 }

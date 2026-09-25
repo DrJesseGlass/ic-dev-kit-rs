@@ -345,26 +345,13 @@ pub fn missing_chunks(owner: Principal, expected_count: u32) -> Vec<u32> {
 ///
 /// # Errors
 ///
-/// Returns an error if the owner's parallel buffer is empty.
+/// Returns an error if the owner's parallel buffer is empty; the buffers are
+/// left untouched in that case.
 pub fn consolidate_parallel_chunks(owner: Principal) -> Result<usize, String> {
-    let mut pairs: Vec<(u32, Vec<u8>)> = BUFFER_MAPS.with(|maps| {
-        maps.borrow_mut()
-            .remove(&owner)
-            .map(|map| map.into_iter().collect())
-            .unwrap_or_default()
-    });
+    let consolidated = get_parallel_data(owner)?;
+    let total_size = consolidated.len();
 
-    let total_size: usize = pairs.iter().map(|(_, chunk)| chunk.len()).sum();
-    if total_size == 0 {
-        return Err("No parallel chunks to consolidate".to_string());
-    }
-
-    pairs.sort_unstable_by_key(|(id, _)| *id);
-    let mut consolidated = Vec::with_capacity(total_size);
-    for (_, chunk) in pairs {
-        consolidated.extend(chunk);
-    }
-
+    BUFFER_MAPS.with(|maps| maps.borrow_mut().remove(&owner));
     BUFFERS.with(|buffers| {
         buffers.borrow_mut().insert(owner, consolidated);
     });
@@ -386,19 +373,21 @@ pub fn get_parallel_data(owner: Principal) -> Result<Vec<u8>, String> {
             .get(&owner)
             .filter(|m| !m.is_empty())
             .ok_or_else(|| "No parallel chunks available".to_string())?;
-
-        let mut sorted_ids: Vec<u32> = map.keys().copied().collect();
-        sorted_ids.sort();
-
-        let mut consolidated = Vec::new();
-        for chunk_id in sorted_ids {
-            if let Some(chunk) = map.get(&chunk_id) {
-                consolidated.extend_from_slice(chunk);
-            }
-        }
-
-        Ok(consolidated)
+        Ok(concat_in_order(map))
     })
+}
+
+/// Concatenate chunks in ascending `chunk_id` order.
+fn concat_in_order(map: &HashMap<u32, Vec<u8>>) -> Vec<u8> {
+    let mut pairs: Vec<(u32, &Vec<u8>)> = map.iter().map(|(id, c)| (*id, c)).collect();
+    pairs.sort_unstable_by_key(|(id, _)| *id);
+
+    let total: usize = pairs.iter().map(|(_, c)| c.len()).sum();
+    let mut out = Vec::with_capacity(total);
+    for (_, chunk) in pairs {
+        out.extend_from_slice(chunk);
+    }
+    out
 }
 
 /// Clear all of the owner's parallel chunks.
@@ -703,9 +692,16 @@ mod tests {
         assert!(!parallel_chunks_complete(owner, 4));
         assert_eq!(parallel_chunk_ids(owner), vec![0, 1, 2]);
 
+        assert_eq!(get_parallel_data(owner).unwrap(), vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!(parallel_chunk_count(owner), 3);
+
         assert_eq!(consolidate_parallel_chunks(owner).unwrap(), 6);
         assert_eq!(get_buffer_data(owner), vec![1, 2, 3, 4, 5, 6]);
         assert_eq!(parallel_chunk_count(owner), 0);
+
+        // Consolidating with nothing buffered is an error and leaves state alone.
+        assert!(consolidate_parallel_chunks(owner).is_err());
+        assert_eq!(buffer_size(owner), 0);
     }
 
     #[test]

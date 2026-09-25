@@ -46,104 +46,20 @@
 /// dependency on `canistergeek_ic_rust`.
 pub use canistergeek_ic_rust;
 
+use crate::auth::Auth;
 use candid::Principal;
 use canistergeek_ic_rust::api_type::*;
-use ic_cdk;
 use std::cell::RefCell;
-use std::collections::HashSet;
-
-// ═══════════════════════════════════════════════════════════════
-//  Error Types
-// ═══════════════════════════════════════════════════════════════
-
-/// Errors that can occur during telemetry operations.
-#[derive(Debug, thiserror::Error)]
-pub enum TelemetryError {
-    /// The caller is not authorized to access telemetry.
-    #[error("Unauthorized")]
-    Unauthorized,
-    /// The provided principal text is invalid.
-    #[error("Invalid principal")]
-    InvalidPrincipal,
-    /// An error occurred while accessing storage.
-    #[error("Storage error: {0}")]
-    StorageError(String),
-    /// An error occurred during serialization/deserialization.
-    #[error("Serialization error: {0}")]
-    SerializationError(String),
-}
-
-/// Result type for telemetry operations.
-pub type TelemetryResult<T> = Result<T, TelemetryError>;
-
-// ═══════════════════════════════════════════════════════════════
-//  Monitoring Principals Storage
-// ═══════════════════════════════════════════════════════════════
-
-/// Manages principals authorized to view monitoring data.
-///
-/// Separate from the main auth system to allow read-only monitoring access.
-pub struct MonitoringAuth {
-    principals: RefCell<HashSet<Principal>>,
-}
-
-impl MonitoringAuth {
-    /// Create a new empty monitoring auth.
-    pub fn new() -> Self {
-        Self {
-            principals: RefCell::new(HashSet::new()),
-        }
-    }
-
-    /// Create with initial principals.
-    pub fn with_principals(principals: Vec<Principal>) -> Self {
-        let mut set = HashSet::new();
-        for p in principals {
-            set.insert(p);
-        }
-        Self {
-            principals: RefCell::new(set),
-        }
-    }
-
-    /// Check if a principal is authorized for monitoring.
-    pub fn is_monitoring_authorized(&self, principal: &Principal) -> bool {
-        self.principals.borrow().contains(principal)
-    }
-
-    /// Check if a principal is a controller.
-    pub fn is_controller(&self, principal: &Principal) -> bool {
-        ic_cdk::api::is_controller(principal)
-    }
-
-    /// Add a principal to monitoring access.
-    pub fn add_monitoring_principal(&self, principal: Principal) {
-        self.principals.borrow_mut().insert(principal);
-    }
-
-    /// Remove a principal from monitoring access.
-    pub fn remove_monitoring_principal(&self, principal: &Principal) {
-        self.principals.borrow_mut().remove(principal);
-    }
-
-    /// List all monitoring principals.
-    pub fn list_monitoring_principals(&self) -> Vec<Principal> {
-        self.principals.borrow().iter().cloned().collect()
-    }
-}
-
-impl Default for MonitoringAuth {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 // ═══════════════════════════════════════════════════════════════
 //  Global State (Thread-Local for IC)
 // ═══════════════════════════════════════════════════════════════
 
 thread_local! {
-    static MONITORING_AUTH: RefCell<Option<MonitoringAuth>> = RefCell::new(None);
+    /// Principals allowed to *view* monitoring data. Kept separate from the
+    /// main [`auth`](crate::auth) allowlist so read-only observers do not
+    /// become admins. Reuses [`Auth`] as the set type.
+    static MONITORING_AUTH: RefCell<Option<Auth>> = RefCell::new(None);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -154,16 +70,12 @@ thread_local! {
 ///
 /// Call this in your `#[ic_cdk::init]` function.
 pub fn init() {
-    MONITORING_AUTH.with(|a| {
-        *a.borrow_mut() = Some(MonitoringAuth::new());
-    });
+    init_with_principals(Vec::new());
 }
 
 /// Initialize with specific monitoring principals.
 pub fn init_with_principals(principals: Vec<Principal>) {
-    MONITORING_AUTH.with(|a| {
-        *a.borrow_mut() = Some(MonitoringAuth::with_principals(principals));
-    });
+    MONITORING_AUTH.with(|a| *a.borrow_mut() = Some(Auth::with_principals(principals)));
 }
 
 /// Initialize from saved state (for post-upgrade).
@@ -182,16 +94,7 @@ pub fn init_from_saved(
         canistergeek_ic_rust::logger::post_upgrade_stable_data(data);
     }
 
-    // Initialize auth
-    MONITORING_AUTH.with(|a| {
-        *a.borrow_mut() = Some(
-            if let Some(p) = principals {
-                MonitoringAuth::with_principals(p)
-            } else {
-                MonitoringAuth::new()
-            }
-        );
-    });
+    init_with_principals(principals.unwrap_or_default());
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -203,13 +106,9 @@ pub fn init_from_saved(
 /// guards from trapping the canister.
 fn with_monitoring_auth<R, F>(f: F) -> R
 where
-    F: FnOnce(&MonitoringAuth) -> R,
+    F: FnOnce(&Auth) -> R,
 {
-    MONITORING_AUTH.with(|a| {
-        let mut auth_ref = a.borrow_mut();
-        let auth = auth_ref.get_or_insert_with(MonitoringAuth::new);
-        f(auth)
-    })
+    MONITORING_AUTH.with(|a| f(a.borrow_mut().get_or_insert_with(Auth::new)))
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -236,7 +135,7 @@ pub fn is_monitoring_authorized() -> Result<(), String> {
 
     // Otherwise the caller must be on the monitoring allowlist.
     let caller = ic_cdk::api::msg_caller();
-    if with_monitoring_auth(|auth| auth.is_monitoring_authorized(&caller)) {
+    if with_monitoring_auth(|auth| auth.is_authorized(&caller)) {
         return Ok(());
     }
 
@@ -267,19 +166,21 @@ pub fn is_monitoring_admin() -> Result<(), String> {
 ///
 /// Requires admin authorization.
 pub fn add_monitoring_principal(principal: Principal) {
-    with_monitoring_auth(|auth| auth.add_monitoring_principal(principal));
+    with_monitoring_auth(|auth| auth.add_principal(principal));
 }
 
 /// Remove a principal from the monitoring allowlist.
 ///
-/// Requires admin authorization.
+/// Requires admin authorization. Unlike [`auth::remove_principal`]
+/// (crate::auth::remove_principal), emptying this list is allowed: controllers
+/// and admins can always view monitoring data.
 pub fn remove_monitoring_principal(principal: Principal) {
-    with_monitoring_auth(|auth| auth.remove_monitoring_principal(&principal));
+    with_monitoring_auth(|auth| auth.remove_principal(&principal));
 }
 
 /// List all monitoring principals.
 pub fn list_monitoring_principals() -> Vec<Principal> {
-    with_monitoring_auth(|auth| auth.list_monitoring_principals())
+    with_monitoring_auth(|auth| auth.list_principals())
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -315,36 +216,28 @@ pub fn log_message(message: impl Into<String>) {
     canistergeek_ic_rust::logger::log_message(message.into());
 }
 
-/// Log an info message.
-///
-/// Prefixes the message with `[INFO]`.
+fn log_with_level(level: &str, message: impl Into<String>) {
+    log_message(format!("[{}] {}", level, message.into()));
+}
+
+/// Log an info message, prefixed with `[INFO]`.
 pub fn log_info(message: impl Into<String>) {
-    let msg = format!("[INFO] {}", message.into());
-    canistergeek_ic_rust::logger::log_message(msg);
+    log_with_level("INFO", message);
 }
 
-/// Log a warning message.
-///
-/// Prefixes the message with `[WARN]`.
+/// Log a warning message, prefixed with `[WARN]`.
 pub fn log_warning(message: impl Into<String>) {
-    let msg = format!("[WARN] {}", message.into());
-    canistergeek_ic_rust::logger::log_message(msg);
+    log_with_level("WARN", message);
 }
 
-/// Log an error message.
-///
-/// Prefixes the message with `[ERROR]`.
+/// Log an error message, prefixed with `[ERROR]`.
 pub fn log_error(message: impl Into<String>) {
-    let msg = format!("[ERROR] {}", message.into());
-    canistergeek_ic_rust::logger::log_message(msg);
+    log_with_level("ERROR", message);
 }
 
-/// Log a debug message.
-///
-/// Prefixes the message with `[DEBUG]`.
+/// Log a debug message, prefixed with `[DEBUG]`.
 pub fn log_debug(message: impl Into<String>) {
-    let msg = format!("[DEBUG] {}", message.into());
-    canistergeek_ic_rust::logger::log_message(msg);
+    log_with_level("DEBUG", message);
 }
 
 /// Get canister log entries.
@@ -383,12 +276,6 @@ pub fn init_from_bytes(bytes: Option<Vec<u8>>) {
     }
     // Fallback to fresh init if restore fails
     init();
-}
-
-/// Save monitoring principals to bytes (legacy, kept for compatibility).
-pub fn save_principals_to_bytes() -> Vec<u8> {
-    let principals = list_monitoring_principals();
-    candid::encode_args((&principals,)).unwrap_or_default()
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -496,24 +383,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_monitoring_auth() {
-        let auth = MonitoringAuth::new();
-        let test_principal = Principal::anonymous();
+    fn test_monitoring_allowlist_lazily_initializes_and_may_be_emptied() {
+        // Fresh test thread: MONITORING_AUTH is None and must not trap.
+        let p = Principal::anonymous();
+        assert!(list_monitoring_principals().is_empty());
 
-        // Initially not authorized
-        assert!(!auth.is_monitoring_authorized(&test_principal));
+        add_monitoring_principal(p);
+        assert_eq!(list_monitoring_principals(), vec![p]);
 
-        // Add principal
-        auth.add_monitoring_principal(test_principal);
-        assert!(auth.is_monitoring_authorized(&test_principal));
+        // Emptying the monitoring list is allowed (controllers still see data).
+        remove_monitoring_principal(p);
+        assert!(list_monitoring_principals().is_empty());
+    }
 
-        // List principals
-        let list = auth.list_monitoring_principals();
-        assert_eq!(list.len(), 1);
-        assert!(list.contains(&test_principal));
-
-        // Remove principal
-        auth.remove_monitoring_principal(&test_principal);
-        assert!(!auth.is_monitoring_authorized(&test_principal));
+    #[test]
+    fn test_init_replaces_allowlist() {
+        let (a, b) = (Principal::anonymous(), Principal::from_slice(&[1]));
+        init_with_principals(vec![a]);
+        init_from_saved(None, None, Some(vec![b]));
+        assert_eq!(list_monitoring_principals(), vec![b]);
+        init();
+        assert!(list_monitoring_principals().is_empty());
     }
 }

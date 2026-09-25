@@ -45,7 +45,6 @@
 //! `ic_cdk::println!`.
 
 use candid::Principal;
-use ic_cdk;
 use std::cell::RefCell;
 use std::collections::HashSet;
 
@@ -277,11 +276,6 @@ pub fn is_authorized() -> Result<(), String> {
         .map_err(|e| format!("Authorization failed: {}", e))
 }
 
-/// Alias for [`is_authorized`] - check if current caller is authorized.
-pub fn check() -> Result<(), String> {
-    is_authorized()
-}
-
 /// Add a principal to the authorized set.
 ///
 /// # Errors
@@ -319,11 +313,6 @@ pub fn is_principal_authorized(principal: Principal) -> Result<bool, String> {
 /// List all authorized principals.
 pub fn list_principals() -> Result<Vec<Principal>, String> {
     with_auth(|auth| auth.list_principals())
-}
-
-/// Ensure a principal is authorized (add if not present).
-pub fn ensure_authorized(principal: Principal) -> Result<(), String> {
-    add_principal(principal)
 }
 
 // ═══════════════════════════════════════════════════════════════

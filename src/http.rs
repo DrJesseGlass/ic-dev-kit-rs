@@ -37,8 +37,8 @@
 
 use candid::CandidType;
 use serde::{Deserialize, Serialize};
-use serde_json;
 use std::collections::HashMap;
+use std::str::FromStr;
 
 // ═══════════════════════════════════════════════════════════════
 //  Error Types
@@ -286,7 +286,10 @@ pub struct StreamingCallbackHttpResponse {
 }
 
 /// HTTP method enumeration.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+///
+/// Parse with [`str::parse`] (case-insensitive); unknown methods yield
+/// [`HttpError::MethodNotAllowed`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HttpMethod {
     GET,
     POST,
@@ -297,21 +300,24 @@ pub enum HttpMethod {
     HEAD,
 }
 
-impl HttpMethod {
-    /// Parse an HTTP method from a string (case-insensitive).
-    pub fn from_str(method: &str) -> Option<Self> {
-        match method.to_uppercase().as_str() {
-            "GET" => Some(HttpMethod::GET),
-            "POST" => Some(HttpMethod::POST),
-            "PUT" => Some(HttpMethod::PUT),
-            "DELETE" => Some(HttpMethod::DELETE),
-            "PATCH" => Some(HttpMethod::PATCH),
-            "OPTIONS" => Some(HttpMethod::OPTIONS),
-            "HEAD" => Some(HttpMethod::HEAD),
-            _ => None,
+impl FromStr for HttpMethod {
+    type Err = HttpError;
+
+    fn from_str(method: &str) -> Result<Self, Self::Err> {
+        match method.to_ascii_uppercase().as_str() {
+            "GET" => Ok(HttpMethod::GET),
+            "POST" => Ok(HttpMethod::POST),
+            "PUT" => Ok(HttpMethod::PUT),
+            "DELETE" => Ok(HttpMethod::DELETE),
+            "PATCH" => Ok(HttpMethod::PATCH),
+            "OPTIONS" => Ok(HttpMethod::OPTIONS),
+            "HEAD" => Ok(HttpMethod::HEAD),
+            _ => Err(HttpError::MethodNotAllowed),
         }
     }
+}
 
+impl HttpMethod {
     /// Get the method as a static string.
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -358,9 +364,7 @@ pub fn error_response(status_code: u16, error: &str) -> HttpResponse {
 ///
 /// Returns [`HttpError::SerializationError`] if serialization fails.
 pub fn success_response<T: Serialize>(data: &T) -> HttpResult<HttpResponse> {
-    let json = serde_json::to_string(data)
-        .map_err(|e| HttpError::SerializationError(format!("JSON serialization error: {}", e)))?;
-    Ok(json_response(200, json))
+    Ok(json_response(200, to_json(data)?))
 }
 
 /// Create a response indicating the request should be upgraded to an update call.
@@ -432,8 +436,7 @@ pub fn to_json<T>(data: &T) -> HttpResult<String>
 where
     T: Serialize,
 {
-    serde_json::to_string(data)
-        .map_err(|e| HttpError::SerializationError(format!("JSON serialization error: {}", e)))
+    serde_json::to_string(data).map_err(serialization_error)
 }
 
 /// Serialize data to a pretty-printed JSON string.
@@ -445,8 +448,11 @@ pub fn to_json_pretty<T>(data: &T) -> HttpResult<String>
 where
     T: Serialize,
 {
-    serde_json::to_string_pretty(data)
-        .map_err(|e| HttpError::SerializationError(format!("JSON serialization error: {}", e)))
+    serde_json::to_string_pretty(data).map_err(serialization_error)
+}
+
+fn serialization_error(e: serde_json::Error) -> HttpError {
+    HttpError::SerializationError(format!("JSON serialization error: {}", e))
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -604,11 +610,14 @@ pub fn extract_params(path: &str, pattern: &str) -> HashMap<String, String> {
 pub fn get_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
     headers
         .iter()
-        .find(|(k, _)| k.to_lowercase() == name.to_lowercase())
+        .find(|(k, _)| k.eq_ignore_ascii_case(name))
         .map(|(_, v)| v.as_str())
 }
 
-/// Extract bearer token from Authorization header.
+/// Extract bearer token from the Authorization header.
+///
+/// The `Bearer` scheme is matched case-insensitively (RFC 6750) and
+/// surrounding whitespace is trimmed from the token.
 ///
 /// # Example
 ///
@@ -618,13 +627,12 @@ pub fn get_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a
 /// }
 /// ```
 pub fn extract_bearer_token(headers: &[(String, String)]) -> Option<String> {
-    get_header(headers, "Authorization").and_then(|value| {
-        if value.starts_with("Bearer ") {
-            Some(value[7..].to_string())
-        } else {
-            None
-        }
-    })
+    let (scheme, token) = get_header(headers, "Authorization")?.split_once(' ')?;
+    if !scheme.eq_ignore_ascii_case("bearer") {
+        return None;
+    }
+    let token = token.trim();
+    (!token.is_empty()).then(|| token.to_string())
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -759,9 +767,9 @@ impl Router {
             return cors_preflight_response();
         }
 
-        let method = match HttpMethod::from_str(&request.method) {
-            Some(m) => m,
-            None => return HttpError::MethodNotAllowed.to_response(),
+        let method: HttpMethod = match request.method.parse() {
+            Ok(m) => m,
+            Err(e) => return e.to_response(),
         };
 
         let path = extract_path(&request.url);
@@ -806,9 +814,12 @@ mod tests {
 
     #[test]
     fn test_http_method_from_str() {
-        assert_eq!(HttpMethod::from_str("GET"), Some(HttpMethod::GET));
-        assert_eq!(HttpMethod::from_str("post"), Some(HttpMethod::POST));
-        assert_eq!(HttpMethod::from_str("INVALID"), None);
+        assert_eq!("GET".parse::<HttpMethod>().unwrap(), HttpMethod::GET);
+        assert_eq!("post".parse::<HttpMethod>().unwrap(), HttpMethod::POST);
+        assert_eq!(
+            "INVALID".parse::<HttpMethod>().unwrap_err().status_code(),
+            405
+        );
     }
 
     #[test]
@@ -949,7 +960,12 @@ mod tests {
 
         assert_eq!(extract_bearer_token(&headers), Some("token123".to_string()));
 
-        let headers = vec![("Authorization".to_string(), "Basic xyz".to_string())];
-        assert_eq!(extract_bearer_token(&headers), None);
+        let headers = vec![("authorization".to_string(), "bearer  token123 ".to_string())];
+        assert_eq!(extract_bearer_token(&headers), Some("token123".to_string()));
+
+        for value in ["Basic xyz", "Bearer", "Bearer ", "Bearertoken"] {
+            let headers = vec![("Authorization".to_string(), value.to_string())];
+            assert_eq!(extract_bearer_token(&headers), None, "{value:?}");
+        }
     }
 }

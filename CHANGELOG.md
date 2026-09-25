@@ -71,6 +71,34 @@ direct `canistergeek_ic_rust` dependency. Contains breaking changes — see belo
   the macro binds those types to local aliases; invoke `export_candid!` in the
   same module as the macro.
 
+- **http** - `HttpMethod` implements `FromStr` (parse with `str::parse`;
+  unknown methods yield `HttpError::MethodNotAllowed`) and is `Copy`. The
+  inherent `HttpMethod::from_str` returning `Option` was removed.
+  `extract_bearer_token` now matches the `Bearer` scheme case-insensitively
+  and trims the token.
+- **telemetry** - `MonitoringAuth` was removed; the monitoring allowlist is an
+  [`auth::Auth`] internally and the module-level functions are unchanged.
+- **features** - `candle` no longer implies `storage`. Enable `storage`
+  explicitly when using `model_server` (which needs both).
+- **text_generation** - The `tokenizers` helper module was renamed to
+  `tokenizer` so a glob import of the prelude no longer shadows the
+  `tokenizers` crate.
+
+### Removed
+
+- Dead API with no callers: `auth::check`, `auth::ensure_authorized`,
+  `telemetry::TelemetryError`/`TelemetryResult` (never constructed),
+  `telemetry::save_principals_to_bytes` (superseded by `save_to_bytes`),
+  and `text_generation::StopReason::Error` (generation returns `Err` instead).
+
+### Internal
+
+- `intercanister` call variants share one execute-and-decode helper;
+  `telemetry` log levels share one formatter; `large_objects` consolidation
+  and `get_parallel_data` share one ordered-concatenation helper (and
+  consolidation no longer discards the parallel buffer on its error path);
+  `http::success_response` reuses `to_json`.
+
 ## [0.3.0] - 2026-07-18
 
 Adds IC HTTP gateway callback streaming support to the `http` module. Contains

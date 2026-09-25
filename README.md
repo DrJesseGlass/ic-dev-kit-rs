@@ -13,8 +13,8 @@ ic-dev-kit-rs = { git = "https://github.com/DrJesseGlass/ic-dev-kit-rs", tag = "
 # Enable optional features (most common)
 ic-dev-kit-rs = { git = "https://github.com/DrJesseGlass/ic-dev-kit-rs", tag = "v0.2.0", features = ["storage", "telemetry"] }
 
-# ML features (includes storage automatically)
-ic-dev-kit-rs = { git = "https://github.com/DrJesseGlass/ic-dev-kit-rs", tag = "v0.2.0", features = ["text-generation"] }
+# ML features (add "storage" too if you use model_server)
+ic-dev-kit-rs = { git = "https://github.com/DrJesseGlass/ic-dev-kit-rs", tag = "v0.2.0", features = ["text-generation", "storage"] }
 ```
 
 **Note on ML features + wasm:** the `candle`/`text-generation` features pull in

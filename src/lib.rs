@@ -74,7 +74,7 @@ pub mod prelude {
     pub use candid::Principal;
 
     #[cfg(feature = "telemetry")]
-    pub use crate::telemetry::{self, TelemetryError, TelemetryResult};
+    pub use crate::telemetry;
 
     #[cfg(feature = "storage")]
     pub use crate::storage::{self, StorageRegistry};
@@ -86,7 +86,7 @@ pub mod prelude {
     pub use crate::text_generation::{
         self, AutoregressiveModel, GenerationConfig,
         TokenizerHandle, GenerationResponse, StopReason,
-        generate_autoregressive, format_generation_stats, tokenizers,
+        generate_autoregressive, format_generation_stats, tokenizer,
     };
 
     #[cfg(all(feature = "text-generation", feature = "storage"))]

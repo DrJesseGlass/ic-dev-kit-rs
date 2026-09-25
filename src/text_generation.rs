@@ -254,10 +254,8 @@ pub enum StopReason {
     EndOfSequence,
     /// Hit max token limit.
     MaxTokens,
-    /// Hit IC instruction limit (30B).
+    /// Hit the IC instruction budget (see [`INSTRUCTION_LIMIT`]).
     InstructionLimit,
-    /// An error occurred.
-    Error(String),
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -281,7 +279,6 @@ pub fn format_generation_stats(response: &GenerationResponse) -> String {
             StopReason::EndOfSequence => "completed",
             StopReason::MaxTokens => "max tokens reached",
             StopReason::InstructionLimit => "instruction limit reached",
-            StopReason::Error(e) => return format!("error: {}", e),
         }
     )
 }
@@ -291,7 +288,10 @@ pub fn format_generation_stats(response: &GenerationResponse) -> String {
 // ═══════════════════════════════════════════════════════════════
 
 /// Helpers for working with tokenizers.
-pub mod tokenizers {
+///
+/// Named `tokenizer` (singular) so a glob import of the prelude does not
+/// shadow the `tokenizers` crate.
+pub mod tokenizer {
     use tokenizers::Tokenizer;
 
     /// Find the EOS token from common names.

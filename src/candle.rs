@@ -159,7 +159,8 @@ impl<T> ModelManager<T> {
 
     /// Get a reference to the active model.
     pub fn active(&self) -> Option<&T> {
-        self.active_model.as_ref()
+        self.active_model
+            .as_ref()
             .and_then(|name| self.models.get(name))
     }
 
@@ -215,8 +216,8 @@ impl<T> Default for ModelManager<T> {
 ///
 /// GGUF is a file format for storing quantized models efficiently.
 pub mod gguf {
-    use candle_core::Device;
     use candle_core::quantized::gguf_file;
+    use candle_core::Device;
     use std::io::Cursor;
 
     /// Load GGUF content from bytes.

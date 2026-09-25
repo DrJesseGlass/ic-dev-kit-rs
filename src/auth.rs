@@ -45,7 +45,6 @@
 //! `ic_cdk::println!`.
 
 use candid::Principal;
-use ic_cdk;
 use std::cell::RefCell;
 use std::collections::HashSet;
 
@@ -62,6 +61,9 @@ pub enum AuthError {
     /// The provided principal text is invalid.
     #[error("Invalid principal")]
     InvalidPrincipal,
+    /// Removing this principal would leave the authorized set empty.
+    #[error("Cannot remove the last authorized principal")]
+    LastPrincipal,
 }
 
 /// Result type for authentication operations.
@@ -134,8 +136,22 @@ impl Auth {
     }
 
     /// Remove a principal from the authorized set.
-    pub fn remove_principal(&self, principal: &Principal) {
-        self.principals.borrow_mut().remove(principal);
+    ///
+    /// Returns `true` if the principal was present. This is a plain set
+    /// operation; the "never remove the last admin" policy lives in the
+    /// module-level [`remove_principal`].
+    pub fn remove_principal(&self, principal: &Principal) -> bool {
+        self.principals.borrow_mut().remove(principal)
+    }
+
+    /// Number of authorized principals.
+    pub fn len(&self) -> usize {
+        self.principals.borrow().len()
+    }
+
+    /// Whether the authorized set is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// List all authorized principals.
@@ -160,7 +176,7 @@ impl Default for Auth {
 // ═══════════════════════════════════════════════════════════════
 
 thread_local! {
-    static AUTH: RefCell<Option<Auth>> = RefCell::new(None);
+    static AUTH: RefCell<Option<Auth>> = const { RefCell::new(None) };
 }
 
 /// Initialize the auth system with no authorized principals.
@@ -256,13 +272,7 @@ where
 /// }
 /// ```
 pub fn is_authorized() -> Result<(), String> {
-    with_auth(|auth| auth.check_authorized())?
-        .map_err(|e| format!("Authorization failed: {}", e))
-}
-
-/// Alias for [`is_authorized`] - check if current caller is authorized.
-pub fn check() -> Result<(), String> {
-    is_authorized()
+    with_auth(|auth| auth.check_authorized())?.map_err(|e| format!("Authorization failed: {}", e))
 }
 
 /// Add a principal to the authorized set.
@@ -276,12 +286,26 @@ pub fn add_principal(principal: Principal) -> Result<(), String> {
 
 /// Remove a principal from the authorized set.
 ///
+/// Refuses to remove the last authorized principal: emptying the set would
+/// lock every guarded endpoint until the next upgrade. Add a replacement
+/// first. Removing a principal that is not in the set succeeds, with a
+/// message saying it was absent.
+///
 /// # Returns
 ///
-/// Success message or error string.
+/// A message describing what happened, or an error string if auth is not
+/// initialized or `principal` is the only authorized principal.
 pub fn remove_principal(principal: Principal) -> Result<String, String> {
-    with_auth(|auth| auth.remove_principal(&principal))?;
-    Ok("Successfully removed principal from allowlist".to_string())
+    with_auth(|auth| {
+        if auth.len() == 1 && auth.is_authorized(&principal) {
+            return Err(AuthError::LastPrincipal.to_string());
+        }
+        Ok(if auth.remove_principal(&principal) {
+            "Successfully removed principal from allowlist".to_string()
+        } else {
+            "Principal was not in the allowlist".to_string()
+        })
+    })?
 }
 
 /// Check if a specific principal is authorized.
@@ -292,11 +316,6 @@ pub fn is_principal_authorized(principal: Principal) -> Result<bool, String> {
 /// List all authorized principals.
 pub fn list_principals() -> Result<Vec<Principal>, String> {
     with_auth(|auth| auth.list_principals())
-}
-
-/// Ensure a principal is authorized (add if not present).
-pub fn ensure_authorized(principal: Principal) -> Result<(), String> {
-    add_principal(principal)
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -318,8 +337,8 @@ pub fn save_to_bytes() -> Vec<u8> {
 ///
 /// Returns an error if deserialization fails or auth is not initialized.
 pub fn load_from_bytes(bytes: &[u8]) -> Result<(), String> {
-    let (principals,): (Vec<Principal>,) = candid::decode_args(bytes)
-        .map_err(|e| format!("Failed to decode principals: {:?}", e))?;
+    let (principals,): (Vec<Principal>,) =
+        candid::decode_args(bytes).map_err(|e| format!("Failed to decode principals: {:?}", e))?;
     with_auth(|auth| auth.set_principals(principals))
 }
 
@@ -342,7 +361,8 @@ pub fn validate_principal_text(text: &str) -> Result<Principal, AuthError> {
 ///
 /// This macro creates the following IC endpoints:
 /// - `authorize_principal` - Add a principal (guarded)
-/// - `deauthorize_principal` - Remove a principal (guarded)
+/// - `deauthorize_principal` - Remove a principal (guarded; refuses to remove
+///   the last one)
 /// - `get_authorized_principals` - List all principals (guarded)
 /// - `check_principal_authorized` - Check if a principal is authorized (guarded)
 /// - `get_authorized_count` - Get count of authorized principals (guarded)
@@ -364,28 +384,30 @@ macro_rules! export_auth_endpoints {
         }
 
         #[ic_cdk::update(guard = "is_authorized")]
-        fn authorize_principal(principal: candid::Principal) -> Result<(), String> {
+        fn authorize_principal(principal: ::candid::Principal) -> Result<(), String> {
             $crate::auth::add_principal(principal)
         }
 
         #[ic_cdk::update(guard = "is_authorized")]
-        fn deauthorize_principal(principal: candid::Principal) -> String {
-            $crate::auth::remove_principal(principal).unwrap_or_else(|e| e)
+        fn deauthorize_principal(principal: ::candid::Principal) -> Result<String, String> {
+            $crate::auth::remove_principal(principal)
         }
 
         #[ic_cdk::query(guard = "is_authorized")]
-        fn get_authorized_principals() -> Vec<candid::Principal> {
+        fn get_authorized_principals() -> Vec<::candid::Principal> {
             $crate::auth::list_principals().unwrap_or_default()
         }
 
         #[ic_cdk::query(guard = "is_authorized")]
-        fn check_principal_authorized(principal: candid::Principal) -> bool {
+        fn check_principal_authorized(principal: ::candid::Principal) -> bool {
             $crate::auth::is_principal_authorized(principal).unwrap_or(false)
         }
 
         #[ic_cdk::query(guard = "is_authorized")]
         fn get_authorized_count() -> usize {
-            $crate::auth::list_principals().map(|list| list.len()).unwrap_or(0)
+            $crate::auth::list_principals()
+                .map(|list| list.len())
+                .unwrap_or(0)
         }
     };
 }
@@ -410,8 +432,32 @@ mod tests {
         assert!(list.contains(&test_principal));
 
         // Test removing principal
-        auth.remove_principal(&test_principal);
+        assert!(auth.remove_principal(&test_principal));
         assert!(!auth.is_authorized(&test_principal));
+        assert!(!auth.remove_principal(&test_principal));
+        assert!(auth.is_empty());
+    }
+
+    #[test]
+    fn test_cannot_remove_last_principal() {
+        let only = Principal::anonymous();
+        let other = Principal::from_slice(&[9]);
+        init_with_principals(vec![only]);
+
+        // Removing the only principal is refused and leaves it in place.
+        let err = remove_principal(only).unwrap_err();
+        assert!(err.contains("last authorized principal"), "{err}");
+        assert_eq!(list_principals().unwrap(), vec![only]);
+
+        // Removing an absent principal succeeds but says so, even with one left.
+        let msg = remove_principal(other).unwrap();
+        assert!(msg.contains("not in the allowlist"), "{msg}");
+        assert_eq!(list_principals().unwrap(), vec![only]);
+
+        // With a replacement in place, removal succeeds.
+        add_principal(other).unwrap();
+        remove_principal(only).unwrap();
+        assert_eq!(list_principals().unwrap(), vec![other]);
     }
 
     #[test]

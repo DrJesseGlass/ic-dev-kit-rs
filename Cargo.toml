@@ -1,6 +1,6 @@
 [package]
 name = "ic-dev-kit-rs"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "Rust toolkit for IC development - standardizes HTTP generation, large object storage, Canister Geek integration, and common canister patterns"
 authors = ["Jesse Glass <dr.jesse.glass@gmail.com>"]
@@ -11,23 +11,20 @@ categories = ["web-programming", "api-bindings"]
 
 [dependencies]
 # IC dependencies (keep working versions)
-candid = "0.10.31"
+candid = "0.10.36"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # Error handling
-thiserror = "1.0"
-
-# Async support
-async-trait = "0.1"
+thiserror = "2.0"
 
 # Telemetry
 # Upstream canistergeek_ic_rust still pins ic-cdk 0.19 (as of 0.6.0); use the
 # fork migrated to ic-cdk 0.20, pinned to an immutable tag for reproducibility.
 canistergeek_ic_rust = { git = "https://github.com/DrJesseGlass/canistergeek_ic_rust", tag = "v0.6.0", optional = true }
-ic-cdk = "0.20.2"
+ic-cdk = "0.20.3"
 
 # Storage - optional, behind feature flag
 ic-stable-structures = { version = "0.7.2", optional = true }
@@ -38,15 +35,13 @@ candle-nn = { version = "0.11", default-features = false, optional = true }
 candle-transformers = { version = "0.11", default-features = false, optional = true }
 tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"], optional = true }
 
-[dev-dependencies]
-tokio = { version = "1.0", features = ["full", "macros", "rt"] }
-
 [features]
 default = []
 storage = ["ic-stable-structures"]
-candle = ["storage", "candle-core", "candle-nn"]
+candle = ["candle-core", "candle-nn"]
 text-generation = ["candle", "candle-transformers", "tokenizers"]
 telemetry = ["canistergeek_ic_rust"]
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+# Library only: the consumer's canister crate is the cdylib.
+crate-type = ["rlib"]

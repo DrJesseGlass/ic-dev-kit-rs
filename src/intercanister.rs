@@ -54,23 +54,12 @@ where
     R: DeserializeOwned + CandidType,
 {
     log_call_start(canister_id, method);
-
-    let result = Call::unbounded_wait(canister_id, method)
-        .with_args(&args)
-        .await;
-
-    match &result {
-        Ok(_) => log_call_success(canister_id, method),
-        Err(e) => log_call_error(canister_id, method, e),
-    }
-
-    result
-        .map_err(|e| format_call_error(canister_id, method, &e))
-        .and_then(|response| {
-            response
-                .candid::<R>()
-                .map_err(|e| format!("Failed to decode response: {}", e))
-        })
+    execute(
+        canister_id,
+        method,
+        Call::unbounded_wait(canister_id, method).with_args(&args),
+    )
+    .await
 }
 
 /// Make a composite query call (query calling another query).
@@ -83,23 +72,12 @@ where
     R: DeserializeOwned + CandidType,
 {
     log_call_start(canister_id, method);
-
-    let result = Call::bounded_wait(canister_id, method)
-        .with_args(&args)
-        .await;
-
-    match &result {
-        Ok(_) => log_call_success(canister_id, method),
-        Err(e) => log_call_error(canister_id, method, e),
-    }
-
-    result
-        .map_err(|e| format_call_error(canister_id, method, &e))
-        .and_then(|response| {
-            response
-                .candid::<R>()
-                .map_err(|e| format!("Failed to decode response: {}", e))
-        })
+    execute(
+        canister_id,
+        method,
+        Call::bounded_wait(canister_id, method).with_args(&args),
+    )
+    .await
 }
 
 /// Make an inter-canister call with cycles attached.
@@ -132,11 +110,22 @@ where
     R: DeserializeOwned + CandidType,
 {
     log_call_start_with_cycles(canister_id, method, cycles);
+    execute(
+        canister_id,
+        method,
+        Call::unbounded_wait(canister_id, method)
+            .with_args(&args)
+            .with_cycles(cycles),
+    )
+    .await
+}
 
-    let result = Call::unbounded_wait(canister_id, method)
-        .with_args(&args)
-        .with_cycles(cycles)
-        .await;
+/// Await a prepared call, log the outcome, and decode the reply.
+async fn execute<R>(canister_id: Principal, method: &str, call: Call<'_, '_>) -> Result<R, String>
+where
+    R: DeserializeOwned + CandidType,
+{
+    let result = call.await;
 
     match &result {
         Ok(_) => log_call_success(canister_id, method),
@@ -230,8 +219,8 @@ fn log_call_success(canister_id: Principal, method: &str) {
 
 fn log_call_error(canister_id: Principal, method: &str, error: &CallFailed) {
     log_message(&format!(
-        "✗ Call {}.{} failed: {}",
-        canister_id, method, error
+        "✗ {}",
+        format_call_error(canister_id, method, error)
     ));
 }
 

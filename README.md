@@ -8,13 +8,13 @@ Released via git tags (not yet on crates.io). Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ic-dev-kit-rs = { git = "https://github.com/DrJesseGlass/ic-dev-kit-rs", tag = "v0.2.0" }
+ic-dev-kit-rs = { git = "https://github.com/DrJesseGlass/ic-dev-kit-rs", tag = "v0.4.0" }
 
 # Enable optional features (most common)
-ic-dev-kit-rs = { git = "https://github.com/DrJesseGlass/ic-dev-kit-rs", tag = "v0.2.0", features = ["storage", "telemetry"] }
+ic-dev-kit-rs = { git = "https://github.com/DrJesseGlass/ic-dev-kit-rs", tag = "v0.4.0", features = ["storage", "telemetry"] }
 
-# ML features (includes storage automatically)
-ic-dev-kit-rs = { git = "https://github.com/DrJesseGlass/ic-dev-kit-rs", tag = "v0.2.0", features = ["text-generation"] }
+# ML features (add "storage" too if you use model_server)
+ic-dev-kit-rs = { git = "https://github.com/DrJesseGlass/ic-dev-kit-rs", tag = "v0.4.0", features = ["text-generation", "storage"] }
 ```
 
 **Note on ML features + wasm:** the `candle`/`text-generation` features pull in
@@ -146,16 +146,20 @@ fn process_data() {
     telemetry::log_info("Processing completed");
 }
 
-// Use the macro to export Canistergeek-compatible endpoints
+// Use the macro to export Canistergeek-compatible endpoints.
+// Invoke `ic_cdk::export_candid!()` in this same module: the macro binds the
+// Canistergeek types to local aliases so you need no direct dependency on
+// `canistergeek_ic_rust`.
 ic_dev_kit_rs::export_telemetry_endpoints!();
 ```
 
 ### 5. Large Object Uploads
 
 Buffers are keyed by an `owner` principal, so concurrent uploads from
-different callers are isolated from each other. Total buffered bytes per
-owner are capped (2 GiB by default, configurable via
-`large_objects::set_max_bytes_per_owner`). Buffers live on the Wasm heap —
+different callers are isolated from each other. Buffered bytes are capped
+both per owner (1 GiB by default, `large_objects::set_max_bytes_per_owner`)
+and across all owners (2 GiB by default, `large_objects::set_max_total_bytes`),
+since anyone can mint new principals. Buffers live on the Wasm heap —
 finalize uploads before upgrading the canister.
 
 ```rust
@@ -294,7 +298,7 @@ fn post_upgrade() {
 | `init_from_saved(Option<Vec<u8>>)` | Restore from saved bytes |
 | `is_authorized() -> Result<(), String>` | Guard function for IC CDK |
 | `add_principal(Principal)` | Add authorized principal |
-| `remove_principal(Principal)` | Remove authorized principal |
+| `remove_principal(Principal)` | Remove authorized principal (refuses to remove the last one) |
 | `list_principals()` | List all authorized principals |
 | `save_to_bytes() -> Vec<u8>` | Serialize for upgrade |
 
@@ -324,8 +328,8 @@ fn post_upgrade() {
 | `save_bytes(registry, key, Vec<u8>)` | Save raw bytes |
 | `load_bytes(registry, key)` | Load raw bytes |
 | `delete(registry, key)` | Delete entry |
-| `exists(registry, key)` | Check if key exists |
-| `size(registry, key)` | Get size in bytes |
+| `exists(registry, key)` | Check if key exists (no value copy; uses `StorageRegistry::contains_key`) |
+| `size(registry, key)` | Get size in bytes (reads the value) |
 
 ### `large_objects`
 
@@ -347,8 +351,11 @@ All functions take an `owner: Principal` as their first argument (use
 | `clear_parallel_chunks(owner)` | Clear parallel buffer |
 | `storage_status(owner)` | Get detailed status |
 | `total_buffered_bytes(owner)` | Combined buffered bytes for owner |
+| `total_buffered_bytes_all_owners()` | Combined buffered bytes across every owner |
 | `set_max_bytes_per_owner(Option<usize>)` | Set per-owner byte cap (`None` = unlimited) |
-| `max_bytes_per_owner()` | Get the current cap |
+| `max_bytes_per_owner()` | Get the current per-owner cap |
+| `set_max_total_bytes(Option<usize>)` | Set the cap across all owners (`None` = unlimited) |
+| `max_total_bytes()` | Get the current total cap |
 
 ### `intercanister`
 
@@ -381,7 +388,7 @@ All functions take an `owner: Principal` as their first argument (use
 | `export_auth_endpoints!()` | Generate auth management endpoints |
 | `export_telemetry_endpoints!()` | Generate Canistergeek endpoints |
 | `generate_upload_endpoints!(...)` | Generate upload endpoints |
-| `generate_model_endpoints!(...)` | Generate ML inference endpoints |
+| `generate_model_endpoints!(...)` | Generate ML inference endpoints (pass `generate_guard: "fn"` or inference is public) |
 
 ## Examples
 

@@ -76,7 +76,9 @@ fn streaming_strategy_roundtrips_through_candid() {
     let StreamingStrategy::Callback {
         callback,
         token: decoded_token,
-    } = decoded.streaming_strategy.expect("strategy lost on the candid wire");
+    } = decoded
+        .streaming_strategy
+        .expect("strategy lost on the candid wire");
     assert_eq!(callback.0.method, "http_request_streaming_callback");
     assert_eq!(decoded_token, token);
 

@@ -37,8 +37,8 @@
 
 use candid::CandidType;
 use serde::{Deserialize, Serialize};
-use serde_json;
 use std::collections::HashMap;
+use std::str::FromStr;
 
 // ═══════════════════════════════════════════════════════════════
 //  Error Types
@@ -286,7 +286,10 @@ pub struct StreamingCallbackHttpResponse {
 }
 
 /// HTTP method enumeration.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+///
+/// Parse with [`str::parse`] (case-insensitive); unknown methods yield
+/// [`HttpError::MethodNotAllowed`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HttpMethod {
     GET,
     POST,
@@ -297,20 +300,30 @@ pub enum HttpMethod {
     HEAD,
 }
 
-impl HttpMethod {
-    /// Parse an HTTP method from a string (case-insensitive).
-    pub fn from_str(method: &str) -> Option<Self> {
-        match method.to_uppercase().as_str() {
-            "GET" => Some(HttpMethod::GET),
-            "POST" => Some(HttpMethod::POST),
-            "PUT" => Some(HttpMethod::PUT),
-            "DELETE" => Some(HttpMethod::DELETE),
-            "PATCH" => Some(HttpMethod::PATCH),
-            "OPTIONS" => Some(HttpMethod::OPTIONS),
-            "HEAD" => Some(HttpMethod::HEAD),
-            _ => None,
-        }
+impl FromStr for HttpMethod {
+    type Err = HttpError;
+
+    fn from_str(method: &str) -> Result<Self, Self::Err> {
+        HttpMethod::ALL
+            .iter()
+            .find(|m| m.as_str().eq_ignore_ascii_case(method))
+            .copied()
+            .ok_or(HttpError::MethodNotAllowed)
     }
+}
+
+impl HttpMethod {
+    /// Every supported method; [`as_str`](Self::as_str) is the single source
+    /// of truth for their spelling.
+    const ALL: [HttpMethod; 7] = [
+        HttpMethod::GET,
+        HttpMethod::POST,
+        HttpMethod::PUT,
+        HttpMethod::DELETE,
+        HttpMethod::PATCH,
+        HttpMethod::OPTIONS,
+        HttpMethod::HEAD,
+    ];
 
     /// Get the method as a static string.
     pub fn as_str(&self) -> &'static str {
@@ -346,11 +359,12 @@ pub fn json_response(status_code: u16, body: String) -> HttpResponse {
 
 /// Create an error response with JSON body.
 ///
-/// Response format: `{"error": "<message>"}`
+/// Response format: `{"error": "<message>"}`. The message is serialized with
+/// `serde_json`, so any string (including control characters) yields valid JSON.
 pub fn error_response(status_code: u16, error: &str) -> HttpResponse {
     json_response(
         status_code,
-        format!(r#"{{"error":"{}"}}"#, escape_json(error)),
+        serde_json::json!({ "error": error }).to_string(),
     )
 }
 
@@ -360,9 +374,7 @@ pub fn error_response(status_code: u16, error: &str) -> HttpResponse {
 ///
 /// Returns [`HttpError::SerializationError`] if serialization fails.
 pub fn success_response<T: Serialize>(data: &T) -> HttpResult<HttpResponse> {
-    let json = serde_json::to_string(data)
-        .map_err(|e| HttpError::SerializationError(format!("JSON serialization error: {}", e)))?;
-    Ok(json_response(200, json))
+    Ok(json_response(200, to_json(data)?))
 }
 
 /// Create a response indicating the request should be upgraded to an update call.
@@ -394,15 +406,6 @@ pub fn cors_preflight_response() -> HttpResponse {
         ],
         vec![],
     )
-}
-
-/// Escape special characters in a JSON string.
-fn escape_json(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -443,8 +446,7 @@ pub fn to_json<T>(data: &T) -> HttpResult<String>
 where
     T: Serialize,
 {
-    serde_json::to_string(data)
-        .map_err(|e| HttpError::SerializationError(format!("JSON serialization error: {}", e)))
+    serde_json::to_string(data).map_err(serialization_error)
 }
 
 /// Serialize data to a pretty-printed JSON string.
@@ -456,8 +458,11 @@ pub fn to_json_pretty<T>(data: &T) -> HttpResult<String>
 where
     T: Serialize,
 {
-    serde_json::to_string_pretty(data)
-        .map_err(|e| HttpError::SerializationError(format!("JSON serialization error: {}", e)))
+    serde_json::to_string_pretty(data).map_err(serialization_error)
+}
+
+fn serialization_error(e: serde_json::Error) -> HttpError {
+    HttpError::SerializationError(format!("JSON serialization error: {}", e))
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -615,11 +620,14 @@ pub fn extract_params(path: &str, pattern: &str) -> HashMap<String, String> {
 pub fn get_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
     headers
         .iter()
-        .find(|(k, _)| k.to_lowercase() == name.to_lowercase())
+        .find(|(k, _)| k.eq_ignore_ascii_case(name))
         .map(|(_, v)| v.as_str())
 }
 
-/// Extract bearer token from Authorization header.
+/// Extract bearer token from the Authorization header.
+///
+/// The `Bearer` scheme is matched case-insensitively (RFC 6750) and
+/// surrounding whitespace is trimmed from the token.
 ///
 /// # Example
 ///
@@ -629,13 +637,12 @@ pub fn get_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a
 /// }
 /// ```
 pub fn extract_bearer_token(headers: &[(String, String)]) -> Option<String> {
-    get_header(headers, "Authorization").and_then(|value| {
-        if value.starts_with("Bearer ") {
-            Some(value[7..].to_string())
-        } else {
-            None
-        }
-    })
+    let (scheme, token) = get_header(headers, "Authorization")?.split_once(' ')?;
+    if !scheme.eq_ignore_ascii_case("bearer") {
+        return None;
+    }
+    let token = token.trim();
+    (!token.is_empty()).then(|| token.to_string())
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -702,6 +709,10 @@ pub type HandlerFn = fn(HttpRequest) -> HttpResult<HttpResponse>;
 
 /// Simple HTTP router with pattern matching.
 ///
+/// Routes are matched in two passes: an exact path match first, then pattern
+/// routes in the order they were registered. Register more specific patterns
+/// before broader ones.
+///
 /// # Example
 ///
 /// ```rust,ignore
@@ -712,20 +723,29 @@ pub type HandlerFn = fn(HttpRequest) -> HttpResult<HttpResponse>;
 /// let response = router.handle(request);
 /// ```
 pub struct Router {
-    routes: HashMap<(HttpMethod, String), HandlerFn>,
+    routes: Vec<(HttpMethod, String, HandlerFn)>,
 }
 
 impl Router {
     /// Create a new empty router.
     pub fn new() -> Self {
-        Self {
-            routes: HashMap::new(),
-        }
+        Self { routes: Vec::new() }
     }
 
     /// Add a route with a specific method.
+    ///
+    /// Registering the same method and path again replaces the earlier handler
+    /// but keeps its position in the match order.
     pub fn add_route(&mut self, method: HttpMethod, path: impl Into<String>, handler: HandlerFn) {
-        self.routes.insert((method, path.into()), handler);
+        let path = path.into();
+        match self
+            .routes
+            .iter_mut()
+            .find(|(m, p, _)| *m == method && *p == path)
+        {
+            Some(existing) => existing.2 = handler,
+            None => self.routes.push((method, path, handler)),
+        }
     }
 
     /// Add a GET route.
@@ -752,31 +772,29 @@ impl Router {
     ///
     /// Automatically handles CORS preflight (OPTIONS) requests.
     pub fn handle(&self, request: HttpRequest) -> HttpResponse {
+        let method: HttpMethod = match request.method.parse() {
+            Ok(m) => m,
+            Err(e) => return e.to_response(),
+        };
+
         // Handle CORS preflight
-        if request.method.to_uppercase() == "OPTIONS" {
+        if method == HttpMethod::OPTIONS {
             return cors_preflight_response();
         }
 
-        let method = match HttpMethod::from_str(&request.method) {
-            Some(m) => m,
-            None => return HttpError::MethodNotAllowed.to_response(),
-        };
-
         let path = extract_path(&request.url);
+        let for_method = || self.routes.iter().filter(|(m, _, _)| *m == method);
 
-        // Try exact match first
-        if let Some(handler) = self.routes.get(&(method.clone(), path.to_string())) {
-            return handler(request).unwrap_or_else(|e| e.to_response());
+        // Exact match first, then patterns in registration order.
+        let handler = for_method()
+            .find(|(_, route_path, _)| route_path == path)
+            .or_else(|| for_method().find(|(_, route_path, _)| matches_pattern(path, route_path)))
+            .map(|(_, _, handler)| *handler);
+
+        match handler {
+            Some(handler) => handler(request).unwrap_or_else(|e| e.to_response()),
+            None => HttpError::NotFound.to_response(),
         }
-
-        // Try pattern matching
-        for ((route_method, route_path), handler) in &self.routes {
-            if route_method == &method && matches_pattern(path, route_path) {
-                return handler(request).unwrap_or_else(|e| e.to_response());
-            }
-        }
-
-        HttpError::NotFound.to_response()
     }
 }
 
@@ -806,9 +824,12 @@ mod tests {
 
     #[test]
     fn test_http_method_from_str() {
-        assert_eq!(HttpMethod::from_str("GET"), Some(HttpMethod::GET));
-        assert_eq!(HttpMethod::from_str("post"), Some(HttpMethod::POST));
-        assert_eq!(HttpMethod::from_str("INVALID"), None);
+        assert_eq!("GET".parse::<HttpMethod>().unwrap(), HttpMethod::GET);
+        assert_eq!("post".parse::<HttpMethod>().unwrap(), HttpMethod::POST);
+        assert_eq!(
+            "INVALID".parse::<HttpMethod>().unwrap_err().status_code(),
+            405
+        );
     }
 
     #[test]
@@ -893,12 +914,68 @@ mod tests {
     }
 
     #[test]
+    fn test_error_response_is_valid_json_for_any_message() {
+        let nasty = "quote\" backslash\\ newline\n tab\t nul\u{0} bell\u{7}";
+        let response = error_response(400, nasty);
+        let parsed: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(parsed["error"], nasty);
+    }
+
+    fn request(method: &str, url: &str) -> HttpRequest {
+        HttpRequest {
+            method: method.to_string(),
+            url: url.to_string(),
+            headers: vec![],
+            body: vec![],
+        }
+    }
+
+    fn handler_a(_: HttpRequest) -> HttpResult<HttpResponse> {
+        Ok(json_response(200, "a".to_string()))
+    }
+
+    fn handler_b(_: HttpRequest) -> HttpResult<HttpResponse> {
+        Ok(json_response(200, "b".to_string()))
+    }
+
+    #[test]
+    fn test_router_pattern_precedence_is_registration_order() {
+        let mut router = Router::new();
+        router.get("/api/:id", handler_a);
+        router.get("/api/*", handler_b);
+        assert_eq!(router.handle(request("GET", "/api/x")).body, b"a");
+
+        let mut router = Router::new();
+        router.get("/api/*", handler_b);
+        router.get("/api/:id", handler_a);
+        assert_eq!(router.handle(request("GET", "/api/x")).body, b"b");
+    }
+
+    #[test]
+    fn test_router_exact_match_beats_pattern_and_replaces_in_place() {
+        let mut router = Router::new();
+        router.get("/api/*", handler_b);
+        router.get("/api/x", handler_a);
+        assert_eq!(router.handle(request("GET", "/api/x")).body, b"a");
+        assert_eq!(router.handle(request("GET", "/api/y")).body, b"b");
+        assert_eq!(router.handle(request("POST", "/api/x")).status_code, 404);
+
+        router.get("/api/x", handler_b);
+        assert_eq!(router.handle(request("GET", "/api/x")).body, b"b");
+    }
+
+    #[test]
     fn test_extract_bearer_token() {
         let headers = vec![("Authorization".to_string(), "Bearer token123".to_string())];
 
         assert_eq!(extract_bearer_token(&headers), Some("token123".to_string()));
 
-        let headers = vec![("Authorization".to_string(), "Basic xyz".to_string())];
-        assert_eq!(extract_bearer_token(&headers), None);
+        let headers = vec![("authorization".to_string(), "bearer  token123 ".to_string())];
+        assert_eq!(extract_bearer_token(&headers), Some("token123".to_string()));
+
+        for value in ["Basic xyz", "Bearer", "Bearer ", "Bearertoken"] {
+            let headers = vec![("Authorization".to_string(), value.to_string())];
+            assert_eq!(extract_bearer_token(&headers), None, "{value:?}");
+        }
     }
 }

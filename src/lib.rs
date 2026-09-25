@@ -34,16 +34,18 @@
 //! - [`http`] - HTTP request/response types and routing
 //! - [`large_objects`] - Chunked uploads for large files
 //! - [`intercanister`] - Inter-canister call wrappers with logging
-//! - [`storage`] - Type-safe stable storage (requires `storage` feature)
-//! - [`telemetry`] - Canistergeek integration (requires `telemetry` feature)
-//! - [`candle`] - ML model traits (requires `candle` feature)
-//! - [`text_generation`] - LLM generation (requires `text-generation` feature)
-
+//! - `storage` - Type-safe stable storage (requires `storage` feature)
+//! - `telemetry` - Canistergeek integration (requires `telemetry` feature)
+//! - `candle` - ML model traits (requires `candle` feature)
+//! - `text_generation` - LLM generation (requires `text-generation` feature)
+//!
+//! (Feature-gated modules are not linked so `cargo doc` succeeds under any
+//! feature set.)
 
 pub mod auth;
 pub mod http;
-pub mod large_objects;
 pub mod intercanister;
+pub mod large_objects;
 
 #[cfg(feature = "telemetry")]
 pub mod telemetry;
@@ -60,6 +62,27 @@ pub mod text_generation;
 #[cfg(all(feature = "text-generation", feature = "storage"))]
 pub mod model_server;
 
+/// Support items for the exported macros. Not part of the public API.
+///
+/// A `#[cfg(feature = "telemetry")]` written inside a `macro_rules!` body is
+/// evaluated against the features of the crate that *expands* the macro (the
+/// consumer), not this crate's. The macros therefore call these shims, which
+/// are resolved here and become no-ops when `telemetry` is disabled.
+#[doc(hidden)]
+pub mod __private {
+    #[cfg(feature = "telemetry")]
+    pub use crate::telemetry::{collect_metrics, log_error, log_info};
+
+    #[cfg(not(feature = "telemetry"))]
+    pub fn collect_metrics() {}
+
+    #[cfg(not(feature = "telemetry"))]
+    pub fn log_info(_message: impl Into<String>) {}
+
+    #[cfg(not(feature = "telemetry"))]
+    pub fn log_error(_message: impl Into<String>) {}
+}
+
 pub use candid::Principal;
 
 /// Prelude module
@@ -69,26 +92,25 @@ pub mod prelude {
         self, HttpError, HttpMethod, HttpRequest, HttpResponse, HttpResult, StreamingCallback,
         StreamingCallbackHttpResponse, StreamingCallbackToken, StreamingStrategy,
     };
-    pub use crate::large_objects;
     pub use crate::intercanister;
+    pub use crate::large_objects;
     pub use candid::Principal;
 
     #[cfg(feature = "telemetry")]
-    pub use crate::telemetry::{self, TelemetryError, TelemetryResult};
+    pub use crate::telemetry;
 
     #[cfg(feature = "storage")]
     pub use crate::storage::{self, StorageRegistry};
 
     #[cfg(feature = "candle")]
-    pub use crate::candle::{self, CandleModel, ModelMetadata, ModelManager, gguf};
+    pub use crate::candle::{self, gguf, CandleModel, ModelManager, ModelMetadata};
 
     #[cfg(feature = "text-generation")]
     pub use crate::text_generation::{
-        self, AutoregressiveModel, GenerationConfig,
-        TokenizerHandle, GenerationResponse, StopReason,
-        generate_autoregressive, format_generation_stats, tokenizers,
+        self, format_generation_stats, generate_autoregressive, tokenizer, AutoregressiveModel,
+        GenerationConfig, GenerationResponse, StopReason, TokenizerHandle,
     };
 
     #[cfg(all(feature = "text-generation", feature = "storage"))]
-    pub use crate::model_server::{ModelServer, EmptyResult, InferenceRequest, InferenceResponse, ModelInfo};
+    pub use crate::model_server::{InferenceRequest, InferenceResponse, ModelInfo, ModelServer};
 }

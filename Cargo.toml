@@ -9,8 +9,9 @@ repository = "https://github.com/drjesseglass/ic-dev-kit-rs"
 readme = "README.md"
 keywords = ["internet-computer", "ic", "dfinity", "canister", "blockchain"]
 categories = ["web-programming", "api-bindings"]
-# ic-cdk 0.20 requires 1.88; nothing here needs newer.
-rust-version = "1.88"
+# candle-core 0.11 needs 1.94 on aarch64 (stabilized NEON f16 intrinsics);
+# ic-cdk 0.20 alone would allow 1.88. The `msrv` CI job checks this.
+rust-version = "1.94"
 # Keep CI config and the example canister workspace out of the published
 # tarball.
 exclude = [".github/", "examples/"]

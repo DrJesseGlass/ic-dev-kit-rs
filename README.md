@@ -17,7 +17,7 @@ ic-dev-kit-rs = { version = "0.4", features = ["storage", "telemetry"] }
 ic-dev-kit-rs = { version = "0.4", features = ["text-generation", "storage"] }
 ```
 
-Requires Rust 1.88 or newer (inherited from `ic-cdk` 0.20).
+Requires Rust 1.94 or newer (`candle-core` 0.11 needs it on aarch64).
 
 **Note on `telemetry`:** the published `canistergeek_ic_rust` still requires
 `ic-cdk` 0.19, so enabling `telemetry` links a private copy of ic-cdk 0.19

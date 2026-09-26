@@ -7,8 +7,31 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use ic_dev_kit_rs::text_generation::*;
+//! # use ic_dev_kit_rs::candle::{CandleModel, ModelMetadata};
+//! # struct MyLlm;
+//! # impl CandleModel for MyLlm {
+//! #     fn load(_: Vec<u8>, _: Option<Vec<u8>>) -> Result<Self, String> { Ok(MyLlm) }
+//! #     fn metadata(&self) -> ModelMetadata {
+//! #         ModelMetadata { name: String::new(), version: String::new(), architecture: String::new(), parameters: 0, context_length: None }
+//! #     }
+//! #     fn reset(&mut self) {}
+//! # }
+//! # impl AutoregressiveModel for MyLlm {
+//! #     fn init_generation(&mut self, _: String, _: &dyn TokenizerHandle, _: &GenerationConfig) -> Result<String, String> { Ok(String::new()) }
+//! #     fn generate_next_token(&mut self, _: &dyn TokenizerHandle) -> Result<String, String> { Ok(String::new()) }
+//! #     fn is_generation_complete(&self) -> bool { true }
+//! #     fn generated_token_count(&self) -> usize { 0 }
+//! # }
+//! # struct Tok;
+//! # impl TokenizerHandle for Tok {
+//! #     fn encode(&self, _: &str) -> Result<Vec<u32>, String> { Ok(vec![]) }
+//! #     fn decode(&self, _: &[u32]) -> Result<String, String> { Ok(String::new()) }
+//! #     fn vocab_size(&self) -> usize { 0 }
+//! # }
+//! # fn main() -> Result<(), String> {
+//! # let (mut my_llm, tokenizer) = (MyLlm, Tok);
 //!
 //! let response = generate_autoregressive(
 //!     &mut my_llm,
@@ -19,6 +42,8 @@
 //!
 //! println!("Generated: {}", response.text);
 //! println!("{}", format_generation_stats(&response));
+//! # Ok(())
+//! # }
 //! ```
 
 #![cfg(feature = "text-generation")]
@@ -38,7 +63,17 @@ use serde::Deserialize;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
+/// # use ic_dev_kit_rs::candle::{CandleModel, ModelMetadata};
+/// # use ic_dev_kit_rs::text_generation::{AutoregressiveModel, GenerationConfig, TokenizerHandle};
+/// # struct MyLlama { last_token: u32, eos_token: u32, token_count: usize }
+/// # impl CandleModel for MyLlama {
+/// #     fn load(_: Vec<u8>, _: Option<Vec<u8>>) -> Result<Self, String> { Ok(MyLlama { last_token: 0, eos_token: 2, token_count: 0 }) }
+/// #     fn metadata(&self) -> ModelMetadata {
+/// #         ModelMetadata { name: String::new(), version: String::new(), architecture: String::new(), parameters: 0, context_length: None }
+/// #     }
+/// #     fn reset(&mut self) { self.token_count = 0; }
+/// # }
 /// impl AutoregressiveModel for MyLlama {
 ///     fn init_generation(
 ///         &mut self,
@@ -48,6 +83,7 @@ use serde::Deserialize;
 ///     ) -> Result<String, String> {
 ///         // Tokenize prompt, generate first token
 ///         // ...
+/// #       let _ = (prompt, tokenizer, config); self.token_count = 1; Ok(String::new())
 ///     }
 ///
 ///     fn generate_next_token(
@@ -56,6 +92,7 @@ use serde::Deserialize;
 ///     ) -> Result<String, String> {
 ///         // Generate next token
 ///         // ...
+/// #       let _ = tokenizer; self.token_count += 1; Ok(String::new())
 ///     }
 ///
 ///     fn is_generation_complete(&self) -> bool {
@@ -173,7 +210,31 @@ pub const INSTRUCTION_LIMIT: u64 = 30_000_000_000;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
+/// # use ic_dev_kit_rs::text_generation::*;
+/// # use ic_dev_kit_rs::candle::{CandleModel, ModelMetadata};
+/// # struct MyLlm;
+/// # impl CandleModel for MyLlm {
+/// #     fn load(_: Vec<u8>, _: Option<Vec<u8>>) -> Result<Self, String> { Ok(MyLlm) }
+/// #     fn metadata(&self) -> ModelMetadata {
+/// #         ModelMetadata { name: String::new(), version: String::new(), architecture: String::new(), parameters: 0, context_length: None }
+/// #     }
+/// #     fn reset(&mut self) {}
+/// # }
+/// # impl AutoregressiveModel for MyLlm {
+/// #     fn init_generation(&mut self, _: String, _: &dyn TokenizerHandle, _: &GenerationConfig) -> Result<String, String> { Ok(String::new()) }
+/// #     fn generate_next_token(&mut self, _: &dyn TokenizerHandle) -> Result<String, String> { Ok(String::new()) }
+/// #     fn is_generation_complete(&self) -> bool { true }
+/// #     fn generated_token_count(&self) -> usize { 0 }
+/// # }
+/// # struct Tok;
+/// # impl TokenizerHandle for Tok {
+/// #     fn encode(&self, _: &str) -> Result<Vec<u32>, String> { Ok(vec![]) }
+/// #     fn decode(&self, _: &[u32]) -> Result<String, String> { Ok(String::new()) }
+/// #     fn vocab_size(&self) -> usize { 0 }
+/// # }
+/// # fn main() -> Result<(), String> {
+/// # let (mut my_llm, tokenizer) = (MyLlm, Tok);
 /// let response = generate_autoregressive(
 ///     &mut my_llm,
 ///     "Once upon a time".to_string(),
@@ -184,6 +245,9 @@ pub const INSTRUCTION_LIMIT: u64 = 30_000_000_000;
 ///         ..Default::default()
 ///     }
 /// )?;
+/// # let _ = response;
+/// # Ok(())
+/// # }
 /// ```
 pub fn generate_autoregressive<T: AutoregressiveModel>(
     model: &mut T,
@@ -263,9 +327,17 @@ pub enum StopReason {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
+/// # use ic_dev_kit_rs::text_generation::*;
+/// # let response = GenerationResponse {
+/// #     text: String::new(),
+/// #     tokens_generated: 50,
+/// #     instructions_used: 1234567890,
+/// #     stopped_reason: StopReason::EndOfSequence,
+/// # };
 /// println!("{}", format_generation_stats(&response));
 /// // Output: "Generated 50 tokens using 1234567890 instructions (completed)"
+/// # assert_eq!(format_generation_stats(&response), "Generated 50 tokens using 1234567890 instructions (completed)");
 /// ```
 pub fn format_generation_stats(response: &GenerationResponse) -> String {
     format!(

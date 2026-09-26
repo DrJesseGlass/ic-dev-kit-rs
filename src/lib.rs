@@ -5,7 +5,7 @@
 //!
 //! ## Quick Start
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use ic_dev_kit_rs::prelude::*;
 //!
 //! #[ic_cdk::init]
@@ -48,6 +48,8 @@
 //!
 //! (Feature-gated modules are not linked so `cargo doc` succeeds under any
 //! feature set.)
+
+#![warn(missing_docs)]
 
 pub mod auth;
 pub mod http;

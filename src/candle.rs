@@ -10,16 +10,22 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
-//! use ic_dev_kit_rs::candle::{CandleModel, ModelManager};
+//! ```rust
+//! use ic_dev_kit_rs::candle::ModelManager;
+//! # struct MyModel;
+//! # fn main() -> Result<(), String> {
+//! # let (model_v1, model_v2) = (MyModel, MyModel);
 //!
-//! // Register multiple models
+//! // Register multiple models (the first one becomes active)
 //! let mut manager: ModelManager<MyModel> = ModelManager::new();
 //! manager.register("model-v1".to_string(), model_v1);
 //! manager.register("model-v2".to_string(), model_v2);
 //!
 //! // Switch between models
 //! manager.set_active("model-v2")?;
+//! # assert_eq!(manager.active_name(), Some("model-v2"));
+//! # Ok(())
+//! # }
 //! ```
 
 #![cfg(feature = "candle")]
@@ -39,12 +45,15 @@ use std::collections::HashMap;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
+/// # use ic_dev_kit_rs::candle::{gguf, CandleModel, ModelMetadata};
+/// # struct MyVisionModel;
 /// impl CandleModel for MyVisionModel {
 ///     fn load(weights: Vec<u8>, config: Option<Vec<u8>>) -> Result<Self, String> {
 ///         // Load GGUF weights
 ///         let (content, cursor) = gguf::load_content(weights)?;
 ///         // Build model from content...
+/// #       let _ = (content, cursor, config);
 ///         Ok(Self { /* ... */ })
 ///     }
 ///
@@ -104,7 +113,12 @@ pub struct ModelMetadata {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
+/// # use ic_dev_kit_rs::candle::ModelManager;
+/// # struct MyVisionModel;
+/// # impl MyVisionModel { fn classify(&self, _image: &[u8]) -> u32 { 0 } }
+/// # fn main() -> Result<(), String> {
+/// # let (resnet_model, yolo_model, image) = (MyVisionModel, MyVisionModel, vec![0u8; 4]);
 /// let mut manager: ModelManager<MyVisionModel> = ModelManager::new();
 ///
 /// // Register models
@@ -114,10 +128,13 @@ pub struct ModelMetadata {
 /// // Use active model (first registered by default)
 /// if let Some(model) = manager.active() {
 ///     let result = model.classify(&image);
+/// #   assert_eq!(result, 0);
 /// }
 ///
 /// // Switch active model
 /// manager.set_active("yolo-v8")?;
+/// # Ok(())
+/// # }
 /// ```
 pub struct ModelManager<T> {
     models: HashMap<String, T>,

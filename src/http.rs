@@ -22,8 +22,8 @@
 //!
 //! # Router Example
 //!
-//! ```rust,ignore
-//! use ic_dev_kit_rs::http::{Router, HttpMethod, HttpRequest, HttpResponse, HttpResult};
+//! ```rust
+//! use ic_dev_kit_rs::http::{self, HttpRequest, HttpResponse, HttpResult, Router};
 //!
 //! fn status_handler(_req: HttpRequest) -> HttpResult<HttpResponse> {
 //!     http::success_response(&"ok")
@@ -32,7 +32,14 @@
 //! let mut router = Router::new();
 //! router.get("/api/status", status_handler);
 //!
+//! # let request = HttpRequest {
+//! #     method: "GET".to_string(),
+//! #     url: "/api/status".to_string(),
+//! #     headers: vec![],
+//! #     body: vec![],
+//! # };
 //! let response = router.handle(request);
+//! # assert_eq!(response.status_code, 200);
 //! ```
 
 use candid::CandidType;
@@ -51,12 +58,15 @@ use std::str::FromStr;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
+/// # use ic_dev_kit_rs::http::{self, HttpError, HttpRequest, HttpResponse, HttpResult};
 /// fn my_handler(req: HttpRequest) -> HttpResult<HttpResponse> {
+/// #   let valid = !req.body.is_empty();
 ///     if !valid {
 ///         return Err(HttpError::bad_request("Invalid input"));
 ///     }
 ///     // ...
+/// #   http::success_response(&"ok")
 /// }
 /// ```
 #[derive(Debug, thiserror::Error)]
@@ -240,11 +250,24 @@ impl HttpResponse {
 //  Streaming (IC HTTP gateway callback protocol)
 // ═══════════════════════════════════════════════════════════════
 
-// Reference to the query method the HTTP gateway calls to fetch the next
-// body chunk: `(StreamingCallbackToken) -> (StreamingCallbackHttpResponse) query`.
-candid::define_function!(
-    pub StreamingCallback : (StreamingCallbackToken) -> (StreamingCallbackHttpResponse) query
-);
+mod streaming_callback {
+    // `candid::define_function!` generates the struct and its constructor and
+    // does not accept doc attributes, so the lint is silenced here and the
+    // documentation lives on the re-export below.
+    #![allow(missing_docs)]
+    use super::{StreamingCallbackHttpResponse, StreamingCallbackToken};
+
+    candid::define_function!(
+        pub StreamingCallback : (StreamingCallbackToken) -> (StreamingCallbackHttpResponse) query
+    );
+}
+
+/// Candid function reference to the query method the HTTP gateway calls to
+/// fetch the next body chunk:
+/// `(StreamingCallbackToken) -> (StreamingCallbackHttpResponse) query`.
+///
+/// Build one with `StreamingCallback::new(canister_id, method_name)`.
+pub use streaming_callback::StreamingCallback;
 
 /// Token passed back to the streaming callback to identify the next chunk.
 ///
@@ -291,12 +314,19 @@ pub struct StreamingCallbackHttpResponse {
 /// [`HttpError::MethodNotAllowed`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HttpMethod {
+    /// `GET`
     GET,
+    /// `POST`
     POST,
+    /// `PUT`
     PUT,
+    /// `DELETE`
     DELETE,
+    /// `PATCH`
     PATCH,
+    /// `OPTIONS`
     OPTIONS,
+    /// `HEAD`
     HEAD,
 }
 
@@ -420,11 +450,17 @@ pub fn cors_preflight_response() -> HttpResponse {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
+/// # use ic_dev_kit_rs::http::{self, HttpRequest, HttpResult};
+/// # use serde::Deserialize;
 /// #[derive(Deserialize)]
 /// struct MyData { name: String }
 ///
+/// # fn handler(req: HttpRequest) -> HttpResult<()> {
 /// let data: MyData = http::parse_json(&req.body)?;
+/// # let _ = data.name;
+/// # Ok(())
+/// # }
 /// ```
 pub fn parse_json<T>(body: &[u8]) -> HttpResult<T>
 where
@@ -473,7 +509,8 @@ fn serialization_error(e: serde_json::Error) -> HttpError {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
+/// # use ic_dev_kit_rs::http::extract_path;
 /// assert_eq!(extract_path("/api/users?page=1"), "/api/users");
 /// ```
 pub fn extract_path(url: &str) -> &str {
@@ -484,7 +521,8 @@ pub fn extract_path(url: &str) -> &str {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
+/// # use ic_dev_kit_rs::http::extract_query_params;
 /// let params = extract_query_params("/api/users?page=1&limit=10");
 /// assert_eq!(params.get("page"), Some(&"1".to_string()));
 /// ```
@@ -516,7 +554,8 @@ fn split_path_parts(value: &str) -> Vec<&str> {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
+/// # use ic_dev_kit_rs::http::matches_pattern;
 /// assert!(matches_pattern("/api/users/123", "/api/users/:id"));
 /// assert!(matches_pattern("/api/v1/data", "/api/*"));
 /// ```
@@ -552,7 +591,8 @@ pub fn matches_pattern(path: &str, pattern: &str) -> bool {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
+/// # use ic_dev_kit_rs::http::extract_params;
 /// let params = extract_params("/api/users/123", "/api/users/:id");
 /// assert_eq!(params.get("id"), Some(&"123".to_string()));
 /// ```
@@ -612,10 +652,14 @@ pub fn extract_params(path: &str, pattern: &str) -> HashMap<String, String> {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
+/// # use ic_dev_kit_rs::http::{get_header, HttpRequest};
+/// # fn handler(req: &HttpRequest) {
 /// if let Some(content_type) = get_header(&req.headers, "content-type") {
 ///     // ...
+/// #   let _ = content_type;
 /// }
+/// # }
 /// ```
 pub fn get_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
     headers
@@ -631,10 +675,14 @@ pub fn get_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
+/// # use ic_dev_kit_rs::http::{extract_bearer_token, HttpRequest};
+/// # fn handler(req: &HttpRequest) {
 /// if let Some(token) = extract_bearer_token(&req.headers) {
 ///     // Validate token...
+/// #   let _ = token;
 /// }
+/// # }
 /// ```
 pub fn extract_bearer_token(headers: &[(String, String)]) -> Option<String> {
     let (scheme, token) = get_header(headers, "Authorization")?.split_once(' ')?;
@@ -715,12 +763,17 @@ pub type HandlerFn = fn(HttpRequest) -> HttpResult<HttpResponse>;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
+/// # use ic_dev_kit_rs::http::{self, HttpRequest, HttpResponse, HttpResult, Router};
+/// # fn status_handler(_: HttpRequest) -> HttpResult<HttpResponse> { http::success_response(&"ok") }
+/// # fn create_user_handler(_: HttpRequest) -> HttpResult<HttpResponse> { http::success_response(&"created") }
 /// let mut router = Router::new();
 /// router.get("/api/status", status_handler);
 /// router.post("/api/users", create_user_handler);
 ///
+/// # let request = HttpRequest { method: "POST".to_string(), url: "/api/users".to_string(), headers: vec![], body: vec![] };
 /// let response = router.handle(request);
+/// # assert_eq!(response.body, br#""created""#);
 /// ```
 pub struct Router {
     routes: Vec<(HttpMethod, String, HandlerFn)>,

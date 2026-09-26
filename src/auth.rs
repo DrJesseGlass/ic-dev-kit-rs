@@ -7,7 +7,7 @@
 //!
 //! # Quick Start
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use ic_dev_kit_rs::auth;
 //!
 //! #[ic_cdk::init]
@@ -23,17 +23,20 @@
 //!
 //! # Upgrade Persistence
 //!
-//! ```rust,ignore
+//! ```rust,no_run
+//! # use ic_dev_kit_rs::auth;
 //! #[ic_cdk::pre_upgrade]
 //! fn pre_upgrade() {
 //!     let bytes = auth::save_to_bytes();
-//!     // Store bytes in stable memory
+//!     // Write `bytes` to stable memory (see the README's Upgrade Persistence).
+//! #   let _ = bytes;
 //! }
 //!
 //! #[ic_cdk::post_upgrade]
 //! fn post_upgrade() {
-//!     // Load bytes from stable memory
-//!     auth::init_from_saved(Some(bytes));
+//!     // Read the bytes back from stable memory; `None` if there were none.
+//! #   let bytes: Option<Vec<u8>> = None;
+//!     auth::init_from_saved(bytes);
 //! }
 //! ```
 //!
@@ -80,7 +83,9 @@ pub type AuthResult<T> = Result<T, AuthError>;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
+/// # use ic_dev_kit_rs::auth::Auth;
+/// # let my_principal = candid::Principal::anonymous();
 /// let auth = Auth::new();
 /// auth.add_principal(my_principal);
 /// assert!(auth.is_authorized(&my_principal));
@@ -194,7 +199,8 @@ pub fn init() {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
+/// # use ic_dev_kit_rs::auth;
 /// #[ic_cdk::init]
 /// fn init() {
 ///     auth::init_with_caller();
@@ -265,7 +271,8 @@ where
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
+/// # use ic_dev_kit_rs::auth;
 /// #[ic_cdk::update(guard = "auth::is_authorized")]
 /// fn admin_function() {
 ///     // Only authorized principals reach here
@@ -346,8 +353,13 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<(), String> {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
+/// # use ic_dev_kit_rs::auth;
+/// # fn main() -> Result<(), auth::AuthError> {
 /// let principal = auth::validate_principal_text("2vxsx-fae")?;
+/// # assert_eq!(principal, candid::Principal::anonymous());
+/// # Ok(())
+/// # }
 /// ```
 pub fn validate_principal_text(text: &str) -> Result<Principal, AuthError> {
     Principal::from_text(text).map_err(|_| AuthError::InvalidPrincipal)
@@ -373,7 +385,7 @@ pub fn validate_principal_text(text: &str) -> Result<Principal, AuthError> {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
 /// ic_dev_kit_rs::export_auth_endpoints!();
 /// ```
 #[macro_export]

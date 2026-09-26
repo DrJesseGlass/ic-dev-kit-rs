@@ -20,6 +20,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   endpoint macros at a crate root and runs `export_candid!` over them, so
   this class of bug is caught in CI.
 
+### Documentation
+
+- The README upgrade-persistence example kept its bytes in a `thread_local`,
+  which an upgrade wipes; it now writes to stable memory like the example
+  canister. Added README coverage for gateway streaming and the ML modules,
+  completed the reference tables and macro arms, and added a Development
+  section mirroring CI.
+- Doc examples are now compiled: 46 doctests run (pure helpers execute,
+  canister-shaped examples are `no_run`), down from 45 ignored. Public items
+  must be documented (`#![warn(missing_docs)]`, enforced by clippy in CI).
+- `STORAGE_EXAMPLES.md`: fixed a `load_candid` turbofish that did not
+  compile and removed the duplicate API table.
+
 ## [0.4.0] - 2026-09-25
 
 Hardening release. Fixes nondeterministic routing and invalid error JSON in

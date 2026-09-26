@@ -40,8 +40,13 @@ and register a custom entropy source (IC canisters typically seed from
 |---------|-------------|--------------|
 | `storage` | Stable storage utilities | `ic-stable-structures` |
 | `telemetry` | Canistergeek monitoring/logging | `canistergeek_ic_rust` |
-| `candle` | ML model infrastructure | `candle-core`, `candle-nn` |
-| `text-generation` | LLM text generation | `candle`, `tokenizers` |
+| `candle` | ML model traits and GGUF helpers | `candle-core`, `candle-nn` |
+| `text-generation` | LLM generation loop and tokenizer helpers | `candle`, `candle-transformers`, `tokenizers` |
+
+The `model_server` module (ready-made LLM server plus `generate_model_endpoints!`)
+is compiled only when **both** `text-generation` and `storage` are enabled.
+Modules without a feature (`auth`, `http`, `large_objects`, `intercanister`) are
+always available.
 
 ## Quick Start
 
@@ -90,6 +95,61 @@ fn http_request(req: HttpRequest) -> HttpResponse {
     }
 }
 ```
+
+`http::Router` does the same with pattern routes (`/api/users/:id`, `/api/*`).
+An exact path match wins; otherwise patterns are tried in the order they were
+registered, so register specific patterns before broad ones.
+
+#### Streaming large responses
+
+The IC caps a single response at ~2 MiB. For larger bodies, return the first
+chunk with a `StreamingStrategy` and the gateway calls your callback query for
+the rest until it returns a response with no token:
+
+```rust
+use ic_dev_kit_rs::http::{
+    HttpRequest, HttpResponse, StreamingCallback, StreamingCallbackHttpResponse,
+    StreamingCallbackToken, StreamingStrategy,
+};
+
+// Your chunking: (bytes for `index`, whether more follow)
+fn chunk_for(key: &str, index: u64) -> (Vec<u8>, bool) { /* ... */ }
+
+#[ic_cdk::query]
+fn http_request(req: HttpRequest) -> HttpResponse {
+    let (first_chunk, has_more) = chunk_for(&req.url, 0);
+    let mut response = HttpResponse::new(200, vec![], first_chunk);
+    if has_more {
+        response = response.with_streaming_strategy(StreamingStrategy::Callback {
+            callback: StreamingCallback::new(
+                ic_cdk::api::canister_self(),
+                "http_request_streaming_callback".to_string(),
+            ),
+            token: StreamingCallbackToken {
+                key: req.url.clone(),
+                content_encoding: "identity".to_string(),
+                index: 1u64.into(),
+                sha256: None,
+            },
+        });
+    }
+    response
+}
+
+#[ic_cdk::query]
+fn http_request_streaming_callback(token: StreamingCallbackToken) -> StreamingCallbackHttpResponse {
+    let index: u64 = token.index.0.clone().try_into().unwrap_or(u64::MAX);
+    let (body, has_more) = chunk_for(&token.key, index);
+    StreamingCallbackHttpResponse {
+        body,
+        token: has_more.then(|| StreamingCallbackToken { index: (index + 1).into(), ..token }),
+    }
+}
+```
+
+`StreamingCallbackToken` follows the certified asset canister field layout, so
+existing gateway tooling understands it. `streaming_strategy` is present on the
+Candid wire (what the gateway reads) but omitted from JSON serialization.
 
 ### 3. Storage (requires `storage` feature)
 
@@ -258,43 +318,76 @@ fn fire_and_forget(canister_id: Principal) -> Result<(), String> {
 }
 ```
 
-## Upgrade Persistence
+### 7. ML Model Serving (requires `text-generation` + `storage`)
 
-All modules support canister upgrades:
+`candle` provides the model traits and GGUF loading helpers, `text_generation`
+the autoregressive generation loop with IC instruction-budget handling, and
+`model_server` a ready-made server that loads weights and tokenizer from a
+storage registry. Implement `CandleModel` and `AutoregressiveModel` for your
+model (see the rustdoc for both traits), then:
 
 ```rust
-use ic_dev_kit_rs::auth;
+use ic_dev_kit_rs::model_server::ModelServer;
 
-#[cfg(feature = "telemetry")]
-use ic_dev_kit_rs::telemetry;
-
-// Store bytes in stable memory (use ic-stable-structures or similar)
 thread_local! {
-    static AUTH_BACKUP: RefCell<Vec<u8>> = RefCell::new(Vec::new());
-    #[cfg(feature = "telemetry")]
-    static TELEMETRY_BACKUP: RefCell<Vec<u8>> = RefCell::new(Vec::new());
+    static MODEL_SERVER: ModelServer<MyLlm> = ModelServer::new();
+    // REGISTRY: a StableBTreeMap<String, Vec<u8>, _> as in section 3
 }
+
+// setup_model / reset_generation (admin), generate (guarded by generate_guard),
+// is_model_loaded / get_model_info (public)
+ic_dev_kit_rs::generate_model_endpoints!(
+    server: MODEL_SERVER,
+    registry: REGISTRY,
+    weights_key: "model_weights",
+    tokenizer_key: "tokenizer",
+    get_tokenizer: |model| Box::new(model.tokenizer_handle()),
+    generate_guard: "is_authorized"   // omit and `generate` is public
+);
+
+// Chunked upload of the weights into REGISTRY (see section 5)
+ic_dev_kit_rs::generate_upload_endpoints!(guard = "is_authorized", registry = REGISTRY);
+```
+
+Generation stops on EOS, on `max_tokens`, or when the call approaches the IC
+instruction budget (`text_generation::INSTRUCTION_LIMIT`); the response says
+which. Remember the `getrandom` note in the installation section for wasm
+builds. Invoke `ic_cdk::export_candid!()` in the same module as these macros.
+
+## Upgrade Persistence
+
+`auth` and `telemetry` keep their state on the Wasm heap, which an upgrade
+wipes. Serialize both in `pre_upgrade` into **stable** memory and restore in
+`post_upgrade`. With the `storage` feature and the `REGISTRY` from section 3:
+
+```rust
+use ic_dev_kit_rs::{auth, storage, telemetry};
 
 #[ic_cdk::pre_upgrade]
 fn pre_upgrade() {
-    AUTH_BACKUP.with(|b| *b.borrow_mut() = auth::save_to_bytes());
-    
-    #[cfg(feature = "telemetry")]
-    TELEMETRY_BACKUP.with(|b| *b.borrow_mut() = telemetry::save_to_bytes());
+    REGISTRY.with(|reg| {
+        storage::save_bytes(reg, "__auth__", auth::save_to_bytes());
+        storage::save_bytes(reg, "__telemetry__", telemetry::save_to_bytes());
+    });
 }
 
 #[ic_cdk::post_upgrade]
 fn post_upgrade() {
-    let auth_data = AUTH_BACKUP.with(|b| b.borrow().clone());
-    auth::init_from_saved(if auth_data.is_empty() { None } else { Some(auth_data) });
-    
-    #[cfg(feature = "telemetry")]
-    {
-        let telemetry_data = TELEMETRY_BACKUP.with(|b| b.borrow().clone());
-        telemetry::init_from_bytes(if telemetry_data.is_empty() { None } else { Some(telemetry_data) });
-    }
+    REGISTRY.with(|reg| {
+        auth::init_from_saved(storage::load_bytes(reg, "__auth__"));
+        telemetry::init_from_bytes(storage::load_bytes(reg, "__telemetry__"));
+    });
 }
 ```
+
+Without `storage`, write the bytes with `ic_cdk::stable` (or any stable-memory
+structure) instead. A `thread_local!` buffer is **not** enough: it lives on the
+heap and is gone after the upgrade.
+
+If `init_from_saved` receives `None` or undecodable bytes it authorizes the
+caller of the upgrade, so a lost allowlist never locks you out; the fallback is
+logged. `telemetry::init_from_bytes` falls back to a fresh, empty state. The
+[example canister](./examples/simple_counter) does exactly this.
 
 ## Module Reference
 
@@ -305,23 +398,37 @@ fn post_upgrade() {
 | `init()` | Initialize with empty auth |
 | `init_with_caller()` | Initialize with deployer authorized |
 | `init_with_principals(Vec<Principal>)` | Initialize with specific principals |
-| `init_from_saved(Option<Vec<u8>>)` | Restore from saved bytes |
+| `init_from_saved(Option<Vec<u8>>)` | Restore from saved bytes (falls back to authorizing the caller) |
 | `is_authorized() -> Result<(), String>` | Guard function for IC CDK |
 | `add_principal(Principal)` | Add authorized principal |
 | `remove_principal(Principal)` | Remove authorized principal (refuses to remove the last one) |
+| `is_principal_authorized(Principal)` | Check a specific principal |
 | `list_principals()` | List all authorized principals |
 | `save_to_bytes() -> Vec<u8>` | Serialize for upgrade |
+| `load_from_bytes(&[u8])` | Replace the set from saved bytes (errors instead of falling back) |
+| `validate_principal_text(&str)` | Parse principal text into a `Principal` |
+
+`Auth` is also available as a plain type (`Auth::new`, `with_principals`,
+`add_principal`, `remove_principal`, `list_principals`, `len`) for code that
+keeps its own allowlist.
 
 ### `http`
 
-**Types:** `HttpRequest`, `HttpResponse`, `HttpError`, `HttpMethod`, `Router`
+**Types:** `HttpRequest`, `HttpResponse` (`new`, `with_streaming_strategy`),
+`HttpError` (maps to status codes; `to_response()`), `HttpMethod` (`str::parse`,
+`as_str`), `Router`, `StreamingStrategy`, `StreamingCallback`,
+`StreamingCallbackToken`, `StreamingCallbackHttpResponse`, the `IntoHttpResponse`
+extension trait for `Result<T, HttpError>`, and `http::status::*` constants.
 
 | Function | Description |
 |----------|-------------|
 | `parse_json<T>(&[u8])` | Parse request body as JSON |
+| `to_json<T>(&T)` / `to_json_pretty<T>(&T)` | Serialize to a JSON string |
 | `success_response<T>(&T)` | Create 200 JSON response |
-| `error_response(u16, &str)` | Create error response |
+| `error_response(u16, &str)` | Create `{"error": ...}` response |
 | `json_response(u16, String)` | Create JSON response with status |
+| `upgrade_response()` | Ask the gateway to retry as an update call |
+| `cors_preflight_response()` | 204 with permissive CORS headers |
 | `extract_path(&str)` | Extract path from URL |
 | `extract_query_params(&str)` | Extract query parameters |
 | `extract_params(&str, &str)` | Extract path parameters from pattern |
@@ -334,12 +441,16 @@ fn post_upgrade() {
 | Function | Description |
 |----------|-------------|
 | `save_candid<T>(registry, key, &T)` | Save any CandidType |
-| `load_candid<T>(registry, key)` | Load any CandidType |
+| `load_candid<T, _>(registry, key)` | Load any CandidType |
 | `save_bytes(registry, key, Vec<u8>)` | Save raw bytes |
 | `load_bytes(registry, key)` | Load raw bytes |
 | `delete(registry, key)` | Delete entry |
 | `exists(registry, key)` | Check if key exists (no value copy; uses `StorageRegistry::contains_key`) |
 | `size(registry, key)` | Get size in bytes (reads the value) |
+
+`StorageRegistry` is implemented for `StableBTreeMap<String, Vec<u8>, M>`.
+Implement it (`insert`, `get`, `remove`, optionally `contains_key`) for other
+backends. See [STORAGE_EXAMPLES.md](./STORAGE_EXAMPLES.md) for patterns.
 
 ### `large_objects`
 
@@ -348,12 +459,16 @@ All functions take an `owner: Principal` as their first argument (use
 
 | Function | Description |
 |----------|-------------|
-| `append_chunk(owner, Vec<u8>)` | Add to sequential buffer (checks cap) |
+| `append_chunk(owner, Vec<u8>)` | Add to sequential buffer (checks caps) |
+| `load_to_buffer(owner, Vec<u8>)` | Replace the sequential buffer (checks caps) |
 | `buffer_size(owner)` | Get sequential buffer size |
 | `get_buffer_data(owner)` | Get and clear sequential buffer |
 | `clear_buffer(owner)` | Clear sequential buffer |
-| `append_parallel_chunk(owner, u32, Vec<u8>)` | Add chunk with ID (checks cap) |
+| `append_parallel_chunk(owner, u32, Vec<u8>)` | Add chunk with ID (checks caps; replaces an existing ID) |
+| `remove_parallel_chunk(owner, u32)` | Remove one chunk |
 | `parallel_chunk_count(owner)` | Get parallel chunk count |
+| `parallel_chunk_ids(owner)` | Sorted chunk IDs present |
+| `parallel_buffer_size(owner)` | Total parallel bytes |
 | `parallel_chunks_complete(owner, u32)` | Check all chunks received |
 | `missing_chunks(owner, u32)` | Get missing chunk IDs |
 | `consolidate_parallel_chunks(owner)` | Merge parallel to sequential |
@@ -371,7 +486,8 @@ All functions take an `owner: Principal` as their first argument (use
 
 | Function | Description |
 |----------|-------------|
-| `call<T,R>(Principal, &str, T)` | Async call with logging |
+| `call<T,R>(Principal, &str, T)` | Async call with logging (unbounded wait) |
+| `query_call<T,R>(Principal, &str, T)` | Bounded-wait call, for composite queries |
 | `call_with_payment<T,R>(Principal, &str, T, u128)` | Call with cycles |
 | `call_one_way<T>(Principal, &str, T)` | Fire-and-forget notification |
 | `call_no_args<R>(Principal, &str)` | Call with no arguments |
@@ -380,29 +496,58 @@ All functions take an `owner: Principal` as their first argument (use
 
 | Function | Description |
 |----------|-------------|
-| `init()` | Initialize telemetry |
+| `init()` / `init_with_principals(Vec<Principal>)` | Initialize telemetry (lazily done on first use if skipped) |
 | `collect_metrics()` | Collect canister metrics |
-| `log_info(msg)` | Log info message |
-| `log_warning(msg)` | Log warning message |
-| `log_error(msg)` | Log error message |
-| `log_debug(msg)` | Log debug message |
-| `is_monitoring_authorized()` | Guard for monitoring endpoints |
-| `add_monitoring_principal(Principal)` | Add monitoring access |
-| `save_to_bytes()` | Serialize for upgrade |
-| `init_from_bytes(Option<Vec<u8>>)` | Restore from saved bytes |
+| `update_information()` | Trigger a normal Canistergeek metrics update |
+| `get_information(request)` | Canistergeek information query |
+| `log_message(msg)` | Log without a level prefix |
+| `log_info(msg)` / `log_warning(msg)` / `log_error(msg)` / `log_debug(msg)` | Log with a level prefix |
+| `get_canister_log(request)` | Read log entries |
+| `is_monitoring_authorized()` | Guard for viewing: controllers, `auth` admins, or monitoring principals |
+| `is_monitoring_admin()` | Guard for managing the monitoring list: controllers or `auth` admins |
+| `add_monitoring_principal(Principal)` / `remove_monitoring_principal(Principal)` | Manage monitoring access |
+| `list_monitoring_principals()` | List monitoring principals |
+| `save_to_bytes()` | Serialize metrics, logs, and principals for upgrade |
+| `init_from_bytes(Option<Vec<u8>>)` / `init_from_saved(...)` | Restore from saved bytes / decoded parts |
+
+The Canistergeek crate is re-exported as `telemetry::canistergeek_ic_rust`.
 
 ## Macros
 
-| Macro | Description |
-|-------|-------------|
-| `export_auth_endpoints!()` | Generate auth management endpoints |
-| `export_telemetry_endpoints!()` | Generate Canistergeek endpoints |
-| `generate_upload_endpoints!(...)` | Generate upload endpoints |
-| `generate_model_endpoints!(...)` | Generate ML inference endpoints (pass `generate_guard: "fn"` or inference is public) |
+Each macro defines its endpoints, and any local guard functions it needs, in
+the module where it is invoked. Invoke `ic_cdk::export_candid!()` in that same
+module.
+
+| Macro | Generates | Arms |
+|-------|-----------|------|
+| `export_auth_endpoints!()` | `authorize_principal`, `deauthorize_principal`, `get_authorized_principals`, `check_principal_authorized`, `get_authorized_count`, plus a local `is_authorized` guard fn | none |
+| `export_telemetry_endpoints!()` | `getCanistergeekInformation`, `updateCanistergeekInformation`, `getCanisterLog`, `authorize_monitoring`, `deauthorize_monitoring`, `get_monitoring_principals` | `(admin_guard = "fn")` to guard the two admin endpoints with your own function (default: `telemetry::is_monitoring_admin`) |
+| `generate_upload_endpoints!(...)` | Sequential and parallel upload endpoints plus `get_storage_status` | `()` public (not for production), `(guard = "fn")`, `(guard = "fn", registry = REG)` adds `save_buffer_to_storage`, `save_parallel_to_storage`, `storage_key_exists`, `get_storage_size`, `delete_storage_key` |
+| `generate_model_endpoints!(...)` | `setup_model`, `generate`, `reset_generation`, `is_model_loaded`, `get_model_info` | `generate_guard: "fn"` guards `generate`; omit it and inference is public |
 
 ## Examples
 
 See the [examples](./examples) directory for complete canister examples.
+
+## Development
+
+CI enforces all of the following; run them before pushing:
+
+```bash
+cargo fmt --check
+cargo clippy --all-features --all-targets -- -D warnings
+RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps
+cargo test --no-default-features
+cargo test --features storage,telemetry
+cargo test --all-features
+cargo check --target wasm32-unknown-unknown --features storage,telemetry
+(cd examples/simple_counter/src/example_canister && cargo check --target wasm32-unknown-unknown)
+RUSTFLAGS='--cfg getrandom_backend="custom"' cargo check --target wasm32-unknown-unknown --all-features
+```
+
+`tests/candid_export.rs` expands every endpoint macro and runs
+`ic_cdk::export_candid!` over them; extend it when adding a macro or an
+endpoint type.
 
 ## Releasing
 

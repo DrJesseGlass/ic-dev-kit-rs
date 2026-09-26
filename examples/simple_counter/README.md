@@ -31,7 +31,7 @@ A minimal, working example demonstrating the core features of ic-dev-kit-rs:
 | Method | Function | Auth |
 |--------|----------|------|
 | `authorize_principal(principal)` | Add admin | Admin |
-| `deauthorize_principal(principal)` | Remove admin | Admin |
+| `deauthorize_principal(principal)` | Remove admin; returns `Result`, refuses to remove the last one | Admin |
 | `get_authorized_principals()` | List all admins | Admin |
 | `check_principal_authorized(principal)` | Check if principal is admin | Admin |
 | `get_authorized_count()` | Get admin count | Admin |
@@ -100,8 +100,9 @@ dfx canister call example_canister get_authorized_principals
 # Add admin
 dfx canister call example_canister authorize_principal '(principal "aaaaa-aa")'
 
-# Remove admin
+# Remove admin (Err if it is the only admin left)
 dfx canister call example_canister deauthorize_principal '(principal "aaaaa-aa")'
+# (variant { Ok = "Successfully removed principal from allowlist" })
 
 # Check if principal is admin
 dfx canister call example_canister check_principal_authorized '(principal "aaaaa-aa")'
@@ -155,6 +156,7 @@ examples/simple_counter/
 ├── src/
 │   └── example_canister/
 │       ├── Cargo.toml
+│       ├── example_canister.did   # generated: candid-extractor on the built wasm
 │       └── src/
 │           └── lib.rs
 └── README.md
@@ -185,12 +187,15 @@ dfx canister call example_canister get_authorized_principals
 ```
 
 ### Build errors with ic-dev-kit-rs
-Ensure `Cargo.toml` has correct path and features:
+This example depends on the library at the repository root by path. In your
+own canister use the published crate:
 ```toml
-ic-dev-kit-rs = { path = "../../", features = ["telemetry", "storage"] }
+ic-dev-kit-rs = { version = "0.4", features = ["telemetry", "storage"] }
 ```
+Invoke `ic_cdk::export_candid!()` in the same module as the endpoint macros
+(as `lib.rs` here does), or the Candid export fails to compile.
 
 ## Resources
 
 - [Internet Computer Docs](https://internetcomputer.org/docs)
-- [Canistergeek](https://github.com/usergeek/canistergeek-ic-rust)
+- [Canistergeek](https://github.com/usergeek/canistergeek_ic_rust)

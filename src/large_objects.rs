@@ -25,7 +25,7 @@
 //!
 //! For simple use cases where chunks arrive in order:
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use ic_dev_kit_rs::large_objects;
 //!
 //! #[ic_cdk::update]
@@ -43,7 +43,7 @@
 //!
 //! For faster uploads where chunks may arrive out of order:
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use ic_dev_kit_rs::large_objects;
 //!
 //! #[ic_cdk::update]
@@ -482,13 +482,16 @@ impl std::fmt::Display for StorageStatus {
 ///
 /// # Basic Usage (upload only)
 ///
-/// ```rust,ignore
+/// ```rust,no_run
+/// # use ic_dev_kit_rs::auth;
 /// ic_dev_kit_rs::generate_upload_endpoints!(guard = "auth::is_authorized");
 /// ```
 ///
 /// # With Storage Integration
 ///
 /// ```rust,ignore
+/// // Requires the `storage` feature (this doctest is not compiled: the module
+/// // itself has no feature gate). `tests/candid_export.rs` covers this arm.
 /// ic_dev_kit_rs::generate_upload_endpoints!(
 ///     guard = "auth::is_authorized",
 ///     registry = REGISTRIES

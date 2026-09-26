@@ -5,15 +5,24 @@
 //!
 //! # Quick Start
 //!
-//! ```rust,ignore
+//! ```rust
 //! use ic_dev_kit_rs::storage;
-//! use std::cell::RefCell;
+//! # use std::cell::RefCell;
+//! # include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/map_registry.rs"));
+//! # #[derive(candid::CandidType, candid::Deserialize, Debug, PartialEq)]
+//! # struct MyConfig { name: String }
+//! # fn main() -> Result<(), String> {
+//! # let my_config = MyConfig { name: "x".to_string() };
+//! # let registry = RefCell::new(MapRegistry::default());
 //!
 //! // Save any CandidType
 //! storage::save_candid(&registry, "config", &my_config)?;
 //!
 //! // Load it back
 //! let config: Option<MyConfig> = storage::load_candid(&registry, "config");
+//! # assert_eq!(config, Some(my_config));
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Setting Up a Registry
@@ -33,7 +42,10 @@ use std::cell::RefCell;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
+/// # use std::collections::HashMap;
+/// # use ic_dev_kit_rs::storage::StorageRegistry;
+/// # struct MyMap { map: HashMap<String, Vec<u8>> }
 /// impl StorageRegistry for MyMap {
 ///     fn insert(&mut self, key: String, value: Vec<u8>) {
 ///         self.map.insert(key, value);
@@ -102,10 +114,16 @@ where
 ///
 /// # Example
 ///
-/// ```rust,ignore
-/// REGISTRY.with(|reg| {
-///     storage::save_candid(reg, "my_key", &my_data)?;
-/// });
+/// ```rust
+/// # use std::cell::RefCell;
+/// # use ic_dev_kit_rs::storage;
+/// # include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/map_registry.rs"));
+/// # thread_local! { static REGISTRY: RefCell<MapRegistry> = RefCell::new(MapRegistry::default()); }
+/// # fn main() -> Result<(), String> {
+/// # let my_data = 42u64;
+/// REGISTRY.with(|reg| storage::save_candid(reg, "my_key", &my_data))?;
+/// # Ok(())
+/// # }
 /// ```
 pub fn save_candid<T: CandidType, R: StorageRegistry>(
     registry: &RefCell<R>,
@@ -147,10 +165,18 @@ pub fn save_candid<T: CandidType, R: StorageRegistry>(
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
+/// # use std::cell::RefCell;
+/// # use ic_dev_kit_rs::storage;
+/// # include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/map_registry.rs"));
+/// # thread_local! { static REGISTRY: RefCell<MapRegistry> = RefCell::new(MapRegistry::default()); }
+/// # type MyType = u64;
+/// # fn main() {
 /// let data: Option<MyType> = REGISTRY.with(|reg| {
 ///     storage::load_candid(reg, "my_key")
 /// });
+/// # assert_eq!(data, None);
+/// # }
 /// ```
 pub fn load_candid<T, R: StorageRegistry>(registry: &RefCell<R>, key: &str) -> Option<T>
 where

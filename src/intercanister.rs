@@ -8,7 +8,7 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use ic_dev_kit_rs::intercanister;
 //! use candid::Principal;
 //!
@@ -41,12 +41,18 @@ use serde::de::DeserializeOwned;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
+/// # use ic_dev_kit_rs::intercanister;
+/// # #[derive(candid::CandidType, serde::Deserialize)] struct MyResponse;
+/// # async fn example(canister_id: candid::Principal, arg1: u32, arg2: String) -> Result<(), String> {
 /// let result: MyResponse = intercanister::call(
 ///     canister_id,
 ///     "my_method",
 ///     (arg1, arg2)
 /// ).await?;
+/// # let _ = result;
+/// # Ok(())
+/// # }
 /// ```
 pub async fn call<T, R>(canister_id: Principal, method: &str, args: T) -> Result<R, String>
 where
@@ -91,13 +97,19 @@ where
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
+/// # use ic_dev_kit_rs::intercanister;
+/// # #[derive(candid::CandidType, serde::Deserialize)] struct MyResponse;
+/// # async fn example(canister_id: candid::Principal, arg1: u32) -> Result<(), String> {
 /// let result: MyResponse = intercanister::call_with_payment(
 ///     canister_id,
 ///     "paid_method",
 ///     (arg1,),
 ///     1_000_000  // 1M cycles
 /// ).await?;
+/// # let _ = result;
+/// # Ok(())
+/// # }
 /// ```
 pub async fn call_with_payment<T, R>(
     canister_id: Principal,
@@ -154,12 +166,16 @@ where
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
+/// # use ic_dev_kit_rs::intercanister;
+/// # fn example(logger_canister: candid::Principal, user_id: u64) -> Result<(), String> {
 /// intercanister::call_one_way(
 ///     logger_canister,
 ///     "log_event",
 ///     ("user_action", user_id)
 /// )?;
+/// # Ok(())
+/// # }
 /// ```
 pub fn call_one_way<T>(canister_id: Principal, method: &str, args: T) -> Result<(), String>
 where
@@ -188,8 +204,12 @@ where
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
+/// # use ic_dev_kit_rs::intercanister;
+/// # async fn example(canister_id: candid::Principal) -> Result<u64, String> {
 /// let count: u64 = intercanister::call_no_args(canister_id, "get_count").await?;
+/// # Ok(count)
+/// # }
 /// ```
 pub async fn call_no_args<R>(canister_id: Principal, method: &str) -> Result<R, String>
 where

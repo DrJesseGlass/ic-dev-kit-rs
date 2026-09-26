@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-09-26
+
+### Fixed
+
+- **model_server** - `generate_model_endpoints!` emitted `$crate::...` paths
+  in endpoint signatures. `ic_cdk::export_candid!` re-parses stringified
+  signatures and cannot parse `$crate`, so any canister using the macro
+  together with `export_candid!` failed to compile with "proc macro
+  panicked". The request/response types are now bound to local type aliases
+  (as the telemetry macro already did). Invoke `export_candid!` in the same
+  module as the macro.
+- New integration test `tests/candid_export.rs` expands all four
+  endpoint macros at a crate root and runs `export_candid!` over them, so
+  this class of bug is caught in CI.
+
+### Documentation
+
+- The README upgrade-persistence example kept its bytes in a `thread_local`,
+  which an upgrade wipes; it now writes to stable memory like the example
+  canister. Added README coverage for gateway streaming and the ML modules,
+  completed the reference tables and macro arms, and added a Development
+  section mirroring CI.
+- Doc examples are now compiled: 46 doctests run (pure helpers execute,
+  canister-shaped examples are `no_run`), down from 45 ignored. Public items
+  must be documented (`#![warn(missing_docs)]`, enforced by clippy in CI).
+- `STORAGE_EXAMPLES.md`: fixed a `load_candid` turbofish that did not
+  compile and removed the duplicate API table.
+
 ## [0.4.0] - 2026-09-25
 
 Hardening release. Fixes nondeterministic routing and invalid error JSON in

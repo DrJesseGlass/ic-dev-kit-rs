@@ -5,7 +5,7 @@
 //!
 //! ## Quick Start
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use ic_dev_kit_rs::prelude::*;
 //!
 //! #[ic_cdk::init]
@@ -25,22 +25,31 @@
 //! |---------|-------------|--------------|
 //! | `storage` | Stable storage utilities | `ic-stable-structures` |
 //! | `telemetry` | Canistergeek monitoring/logging | `canistergeek_ic_rust` |
-//! | `candle` | ML model infrastructure | `candle-core`, `candle-nn` |
-//! | `text-generation` | LLM text generation | `candle`, `tokenizers` |
+//! | `candle` | ML model traits and GGUF helpers | `candle-core`, `candle-nn` |
+//! | `text-generation` | LLM generation loop and tokenizer helpers | `candle`, `candle-transformers`, `tokenizers` |
 //!
 //! ## Modules
 //!
 //! - [`auth`] - Principal-based authorization with guard functions
-//! - [`http`] - HTTP request/response types and routing
-//! - [`large_objects`] - Chunked uploads for large files
+//! - [`http`] - HTTP request/response types, routing, and gateway streaming
+//! - [`large_objects`] - Chunked uploads for large files, per-caller and capped
 //! - [`intercanister`] - Inter-canister call wrappers with logging
-//! - `storage` - Type-safe stable storage (requires `storage` feature)
-//! - `telemetry` - Canistergeek integration (requires `telemetry` feature)
-//! - `candle` - ML model traits (requires `candle` feature)
-//! - `text_generation` - LLM generation (requires `text-generation` feature)
+//! - [`prelude`] - Glob-import of the commonly used items
+//! - `storage` - Type-safe stable storage (requires `storage`)
+//! - `telemetry` - Canistergeek integration (requires `telemetry`)
+//! - `candle` - ML model traits and GGUF loading (requires `candle`)
+//! - `text_generation` - LLM generation loop (requires `text-generation`)
+//! - `model_server` - Ready-made LLM server and endpoint macro (requires
+//!   `text-generation` **and** `storage`)
+//!
+//! Endpoint macros: `export_auth_endpoints!`, `export_telemetry_endpoints!`,
+//! `generate_upload_endpoints!`, `generate_model_endpoints!`. Invoke
+//! `ic_cdk::export_candid!()` in the same module as the macros.
 //!
 //! (Feature-gated modules are not linked so `cargo doc` succeeds under any
 //! feature set.)
+
+#![warn(missing_docs)]
 
 pub mod auth;
 pub mod http;

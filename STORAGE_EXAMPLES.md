@@ -2,7 +2,9 @@
 
 ## Overview
 
-The storage module provides **type-safe wrappers** for saving/loading any `CandidType` to IC stable storage using Candid serialization.
+The storage module provides **type-safe wrappers** for saving/loading any `CandidType` to IC stable storage using Candid serialization. It requires the `storage` feature.
+
+The functions take any `RefCell<R>` where `R: StorageRegistry`. The trait is implemented for `StableBTreeMap<String, Vec<u8>, M>`; implement `insert`, `get`, `remove` (and `contains_key`, if your backend can answer it without copying the value) for anything else.
 
 ## Setup
 
@@ -188,7 +190,7 @@ pub fn persist_chain_ids() {
 // Load from stable storage into thread-local
 pub fn restore_chain_ids() {
     if let Some(loaded) = REGISTRY.with(|reg| {
-        storage::load_candid::<HashMap<u8, String>>(reg, "chain_ids")
+        storage::load_candid::<HashMap<u8, String>, _>(reg, "chain_ids")
     }) {
         CHAIN_IDS.with(|ids| {
             *ids.borrow_mut() = loaded;
@@ -202,18 +204,14 @@ pub fn restore_chain_ids() {
 ```rust
 #[ic_cdk::pre_upgrade]
 fn pre_upgrade() {
-    // Save thread-local state to stable storage
+    // Save thread-local state to stable storage (one call per state item)
     persist_chain_ids();
-    persist_session_statuses();
-    persist_allowed_users();
 }
 
 #[ic_cdk::post_upgrade]
 fn post_upgrade() {
     // Restore thread-local state from stable storage
     restore_chain_ids();
-    restore_session_statuses();
-    restore_allowed_users();
 }
 ```
 
@@ -254,12 +252,4 @@ ic_dev_kit_rs::generate_upload_endpoints!(
 
 ## API Reference
 
-| Function | Description |
-|----------|-------------|
-| `save_candid<T>(registry, key, &T)` | Save any CandidType with Candid serialization |
-| `load_candid<T>(registry, key) -> Option<T>` | Load and deserialize a CandidType |
-| `save_bytes(registry, key, Vec<u8>)` | Save raw bytes |
-| `load_bytes(registry, key) -> Option<Vec<u8>>` | Load raw bytes |
-| `exists(registry, key) -> bool` | Check if key exists |
-| `size(registry, key) -> Option<usize>` | Get size of stored value |
-| `delete(registry, key) -> bool` | Delete entry, returns true if existed |
+See the [`storage` table in the README](./README.md#storage-feature-storage).

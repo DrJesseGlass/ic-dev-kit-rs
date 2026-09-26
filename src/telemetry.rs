@@ -5,7 +5,7 @@
 //!
 //! # Quick Start
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use ic_dev_kit_rs::telemetry;
 //!
 //! #[ic_cdk::init]
@@ -23,17 +23,20 @@
 //!
 //! # Upgrade Persistence
 //!
-//! ```rust,ignore
+//! ```rust,no_run
+//! # use ic_dev_kit_rs::telemetry;
 //! #[ic_cdk::pre_upgrade]
 //! fn pre_upgrade() {
 //!     let bytes = telemetry::save_to_bytes();
-//!     // Store bytes in stable memory
+//!     // Write `bytes` to stable memory (see the README's Upgrade Persistence).
+//! #   let _ = bytes;
 //! }
 //!
 //! #[ic_cdk::post_upgrade]
 //! fn post_upgrade() {
-//!     // Load bytes from stable memory
-//!     telemetry::init_from_bytes(Some(bytes));
+//!     // Read the bytes back from stable memory; `None` if there were none.
+//! #   let bytes: Option<Vec<u8>> = None;
+//!     telemetry::init_from_bytes(bytes);
 //! }
 //! ```
 
@@ -121,10 +124,12 @@ where
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
+/// # use ic_dev_kit_rs::telemetry;
 /// #[ic_cdk::query(guard = "telemetry::is_monitoring_authorized")]
 /// fn get_logs() -> Vec<String> {
 ///     // ...
+/// #   Vec::new()
 /// }
 /// ```
 pub fn is_monitoring_authorized() -> Result<(), String> {
@@ -310,9 +315,14 @@ pub fn init_from_bytes(bytes: Option<Vec<u8>>) {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
 /// ic_dev_kit_rs::export_telemetry_endpoints!();
-/// // or, with a custom admin guard:
+/// ```
+///
+/// Or, with a custom admin guard:
+///
+/// ```rust,no_run
+/// # fn my_admin_guard() -> Result<(), String> { Ok(()) }
 /// ic_dev_kit_rs::export_telemetry_endpoints!(admin_guard = "my_admin_guard");
 /// ```
 #[macro_export]

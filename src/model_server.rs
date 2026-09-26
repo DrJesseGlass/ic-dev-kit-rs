@@ -5,12 +5,17 @@
 //!
 //! # Quick Start
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use ic_dev_kit_rs::model_server::ModelServer;
 //! use std::cell::RefCell;
+//! # include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dummy_llm.rs"));
+//! # include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/map_registry.rs"));
+//! # type MyLlm = DummyLlm;
 //!
 //! thread_local! {
 //!     static SERVER: ModelServer<MyLlm> = ModelServer::new();
+//!     // A StorageRegistry holding the weights and tokenizer, e.g. a StableBTreeMap
+//!     static REGISTRIES: RefCell<MapRegistry> = RefCell::new(MapRegistry::default());
 //! }
 //!
 //! // Use the macro to generate all endpoints
@@ -19,8 +24,9 @@
 //!     registry: REGISTRIES,
 //!     weights_key: "model_weights",
 //!     tokenizer_key: "tokenizer",
-//!     get_tokenizer: |model| Box::new(model.get_tokenizer())
+//!     get_tokenizer: |model| Box::new(model.tokenizer_handle())
 //! );
+//! # fn main() {}
 //! ```
 
 #![cfg(all(feature = "text-generation", feature = "storage"))]
@@ -66,13 +72,22 @@ impl<M: AutoregressiveModel> ModelServer<M> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// # use ic_dev_kit_rs::model_server::ModelServer;
+    /// # use std::cell::RefCell;
+    /// # include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dummy_llm.rs"));
+    /// # include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/map_registry.rs"));
+    /// # type MyLlm = DummyLlm;
+    /// # fn example(server: &ModelServer<MyLlm>, registry: &RefCell<MapRegistry>) -> Result<(), String> {
     /// server.setup_from_storage(
-    ///     &registry,
+    ///     registry,
     ///     "model_weights",
     ///     "tokenizer",
-    ///     |model| Box::new(model.tokenizer().clone())
+    ///     |model| Box::new(model.tokenizer_handle())
     /// )?;
+    /// # Ok(())
+    /// # }
+    /// # fn main() {}
     /// ```
     pub fn setup_from_storage<R: StorageRegistry>(
         &self,
@@ -250,10 +265,16 @@ pub struct ModelInfo {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
+/// # use ic_dev_kit_rs::model_server::ModelServer;
+/// # use std::cell::RefCell;
+/// # include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dummy_llm.rs"));
+/// # include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/map_registry.rs"));
+/// # type MyLlm = DummyLlm;
+/// # fn is_authorized() -> Result<(), String> { ic_dev_kit_rs::auth::is_authorized() }
 /// thread_local! {
 ///     static SERVER: ModelServer<MyLlm> = ModelServer::new();
-///     static REGISTRIES: RefCell<StableBTreeMap<...>> = ...;
+///     static REGISTRIES: RefCell<MapRegistry> = RefCell::new(MapRegistry::default());
 /// }
 ///
 /// ic_dev_kit_rs::generate_model_endpoints!(
@@ -261,9 +282,10 @@ pub struct ModelInfo {
 ///     registry: REGISTRIES,
 ///     weights_key: "model_weights",
 ///     tokenizer_key: "tokenizer",
-///     get_tokenizer: |model| Box::new(model.get_tokenizer()),
+///     get_tokenizer: |model| Box::new(model.tokenizer_handle()),
 ///     generate_guard: "is_authorized"
 /// );
+/// # fn main() {}
 /// ```
 #[macro_export]
 macro_rules! generate_model_endpoints {
@@ -300,6 +322,13 @@ macro_rules! generate_model_endpoints {
             $crate::auth::is_authorized()
         }
 
+        // `ic_cdk::export_candid!` re-parses stringified endpoint signatures
+        // and cannot parse `$crate`, so the request/response types are bound
+        // to local aliases first. Invoke `export_candid!` in this module.
+        type __ModelInferenceRequest = $crate::model_server::InferenceRequest;
+        type __ModelInferenceResponse = $crate::model_server::InferenceResponse;
+        type __ModelInfo = $crate::model_server::ModelInfo;
+
         #[ic_cdk::update(guard = "__model_admin_guard")]
         pub fn setup_model() -> Result<(), String> {
             $crate::__private::collect_metrics();
@@ -319,9 +348,7 @@ macro_rules! generate_model_endpoints {
         }
 
         #[ic_cdk::update(guard = $generate_guard)]
-        pub fn generate(
-            request: $crate::model_server::InferenceRequest,
-        ) -> $crate::model_server::InferenceResponse {
+        pub fn generate(request: __ModelInferenceRequest) -> __ModelInferenceResponse {
             $crate::__private::collect_metrics();
 
             let config = request.config.unwrap_or_default();
@@ -330,7 +357,7 @@ macro_rules! generate_model_endpoints {
                 Ok(response) => response.into(),
                 Err(e) => {
                     $crate::__private::log_error(format!("Generation failed: {}", e));
-                    $crate::model_server::InferenceResponse::failure(e)
+                    __ModelInferenceResponse::failure(e)
                 }
             })
         }
@@ -346,8 +373,8 @@ macro_rules! generate_model_endpoints {
         }
 
         #[ic_cdk::query]
-        pub fn get_model_info() -> $crate::model_server::ModelInfo {
-            $server.with(|s| $crate::model_server::ModelInfo {
+        pub fn get_model_info() -> __ModelInfo {
+            $server.with(|s| __ModelInfo {
                 loaded: s.is_loaded(),
                 current_tokens: s.token_count(),
                 metadata: s.metadata(),

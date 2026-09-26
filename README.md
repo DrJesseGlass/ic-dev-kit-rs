@@ -138,7 +138,7 @@ fn http_request(req: HttpRequest) -> HttpResponse {
 
 #[ic_cdk::query]
 fn http_request_streaming_callback(token: StreamingCallbackToken) -> StreamingCallbackHttpResponse {
-    let index: u64 = token.index.0.clone().try_into().unwrap_or(u64::MAX);
+    let index = u64::try_from(&token.index.0).unwrap_or(u64::MAX);
     let (body, has_more) = chunk_for(&token.key, index);
     StreamingCallbackHttpResponse {
         body,
@@ -327,7 +327,7 @@ storage registry. Implement `CandleModel` and `AutoregressiveModel` for your
 model (see the rustdoc for both traits), then:
 
 ```rust
-use ic_dev_kit_rs::model_server::ModelServer;
+use ic_dev_kit_rs::{auth, model_server::ModelServer};
 
 thread_local! {
     static MODEL_SERVER: ModelServer<MyLlm> = ModelServer::new();
@@ -342,11 +342,11 @@ ic_dev_kit_rs::generate_model_endpoints!(
     weights_key: "model_weights",
     tokenizer_key: "tokenizer",
     get_tokenizer: |model| Box::new(model.tokenizer_handle()),
-    generate_guard: "is_authorized"   // omit and `generate` is public
+    generate_guard: "auth::is_authorized"   // omit and `generate` is public
 );
 
 // Chunked upload of the weights into REGISTRY (see section 5)
-ic_dev_kit_rs::generate_upload_endpoints!(guard = "is_authorized", registry = REGISTRY);
+ic_dev_kit_rs::generate_upload_endpoints!(guard = "auth::is_authorized", registry = REGISTRY);
 ```
 
 Generation stops on EOS, on `max_tokens`, or when the call approaches the IC
@@ -358,7 +358,8 @@ builds. Invoke `ic_cdk::export_candid!()` in the same module as these macros.
 
 `auth` and `telemetry` keep their state on the Wasm heap, which an upgrade
 wipes. Serialize both in `pre_upgrade` into **stable** memory and restore in
-`post_upgrade`. With the `storage` feature and the `REGISTRY` from section 3:
+`post_upgrade`. With the `storage` and `telemetry` features and the `REGISTRY`
+from section 3:
 
 ```rust
 use ic_dev_kit_rs::{auth, storage, telemetry};
@@ -547,7 +548,8 @@ RUSTFLAGS='--cfg getrandom_backend="custom"' cargo check --target wasm32-unknown
 
 `tests/candid_export.rs` expands every endpoint macro and runs
 `ic_cdk::export_candid!` over them; extend it when adding a macro or an
-endpoint type.
+endpoint type. The dummy model, tokenizer, and in-memory registry it uses live
+in `tests/fixtures/` and are `include!`d by the doctests too.
 
 ## Releasing
 

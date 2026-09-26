@@ -9,29 +9,9 @@
 //!
 //! ```rust,no_run
 //! use ic_dev_kit_rs::text_generation::*;
-//! # use ic_dev_kit_rs::candle::{CandleModel, ModelMetadata};
-//! # struct MyLlm;
-//! # impl CandleModel for MyLlm {
-//! #     fn load(_: Vec<u8>, _: Option<Vec<u8>>) -> Result<Self, String> { Ok(MyLlm) }
-//! #     fn metadata(&self) -> ModelMetadata {
-//! #         ModelMetadata { name: String::new(), version: String::new(), architecture: String::new(), parameters: 0, context_length: None }
-//! #     }
-//! #     fn reset(&mut self) {}
-//! # }
-//! # impl AutoregressiveModel for MyLlm {
-//! #     fn init_generation(&mut self, _: String, _: &dyn TokenizerHandle, _: &GenerationConfig) -> Result<String, String> { Ok(String::new()) }
-//! #     fn generate_next_token(&mut self, _: &dyn TokenizerHandle) -> Result<String, String> { Ok(String::new()) }
-//! #     fn is_generation_complete(&self) -> bool { true }
-//! #     fn generated_token_count(&self) -> usize { 0 }
-//! # }
-//! # struct Tok;
-//! # impl TokenizerHandle for Tok {
-//! #     fn encode(&self, _: &str) -> Result<Vec<u32>, String> { Ok(vec![]) }
-//! #     fn decode(&self, _: &[u32]) -> Result<String, String> { Ok(String::new()) }
-//! #     fn vocab_size(&self) -> usize { 0 }
-//! # }
+//! # include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dummy_llm.rs"));
 //! # fn main() -> Result<(), String> {
-//! # let (mut my_llm, tokenizer) = (MyLlm, Tok);
+//! # let (mut my_llm, tokenizer) = (DummyLlm, DummyTokenizer);
 //!
 //! let response = generate_autoregressive(
 //!     &mut my_llm,
@@ -212,29 +192,9 @@ pub const INSTRUCTION_LIMIT: u64 = 30_000_000_000;
 ///
 /// ```rust,no_run
 /// # use ic_dev_kit_rs::text_generation::*;
-/// # use ic_dev_kit_rs::candle::{CandleModel, ModelMetadata};
-/// # struct MyLlm;
-/// # impl CandleModel for MyLlm {
-/// #     fn load(_: Vec<u8>, _: Option<Vec<u8>>) -> Result<Self, String> { Ok(MyLlm) }
-/// #     fn metadata(&self) -> ModelMetadata {
-/// #         ModelMetadata { name: String::new(), version: String::new(), architecture: String::new(), parameters: 0, context_length: None }
-/// #     }
-/// #     fn reset(&mut self) {}
-/// # }
-/// # impl AutoregressiveModel for MyLlm {
-/// #     fn init_generation(&mut self, _: String, _: &dyn TokenizerHandle, _: &GenerationConfig) -> Result<String, String> { Ok(String::new()) }
-/// #     fn generate_next_token(&mut self, _: &dyn TokenizerHandle) -> Result<String, String> { Ok(String::new()) }
-/// #     fn is_generation_complete(&self) -> bool { true }
-/// #     fn generated_token_count(&self) -> usize { 0 }
-/// # }
-/// # struct Tok;
-/// # impl TokenizerHandle for Tok {
-/// #     fn encode(&self, _: &str) -> Result<Vec<u32>, String> { Ok(vec![]) }
-/// #     fn decode(&self, _: &[u32]) -> Result<String, String> { Ok(String::new()) }
-/// #     fn vocab_size(&self) -> usize { 0 }
-/// # }
+/// # include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dummy_llm.rs"));
 /// # fn main() -> Result<(), String> {
-/// # let (mut my_llm, tokenizer) = (MyLlm, Tok);
+/// # let (mut my_llm, tokenizer) = (DummyLlm, DummyTokenizer);
 /// let response = generate_autoregressive(
 ///     &mut my_llm,
 ///     "Once upon a time".to_string(),

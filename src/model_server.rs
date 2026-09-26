@@ -8,42 +8,14 @@
 //! ```rust,no_run
 //! use ic_dev_kit_rs::model_server::ModelServer;
 //! use std::cell::RefCell;
-//! # use ic_dev_kit_rs::candle::{CandleModel, ModelMetadata};
-//! # use ic_dev_kit_rs::text_generation::{AutoregressiveModel, GenerationConfig, TokenizerHandle};
-//! # use ic_dev_kit_rs::storage::StorageRegistry;
-//! # use std::collections::HashMap;
-//! # struct MyLlm;
-//! # impl CandleModel for MyLlm {
-//! #     fn load(_: Vec<u8>, _: Option<Vec<u8>>) -> Result<Self, String> { Ok(MyLlm) }
-//! #     fn metadata(&self) -> ModelMetadata {
-//! #         ModelMetadata { name: String::new(), version: String::new(), architecture: String::new(), parameters: 0, context_length: None }
-//! #     }
-//! #     fn reset(&mut self) {}
-//! # }
-//! # impl AutoregressiveModel for MyLlm {
-//! #     fn init_generation(&mut self, _: String, _: &dyn TokenizerHandle, _: &GenerationConfig) -> Result<String, String> { Ok(String::new()) }
-//! #     fn generate_next_token(&mut self, _: &dyn TokenizerHandle) -> Result<String, String> { Ok(String::new()) }
-//! #     fn is_generation_complete(&self) -> bool { true }
-//! #     fn generated_token_count(&self) -> usize { 0 }
-//! # }
-//! # struct Tok;
-//! # impl TokenizerHandle for Tok {
-//! #     fn encode(&self, _: &str) -> Result<Vec<u32>, String> { Ok(vec![]) }
-//! #     fn decode(&self, _: &[u32]) -> Result<String, String> { Ok(String::new()) }
-//! #     fn vocab_size(&self) -> usize { 0 }
-//! # }
-//! # impl MyLlm { fn tokenizer_handle(&self) -> Tok { Tok } }
-//! # #[derive(Default)] struct Reg(HashMap<String, Vec<u8>>);
-//! # impl StorageRegistry for Reg {
-//! #     fn insert(&mut self, k: String, v: Vec<u8>) { self.0.insert(k, v); }
-//! #     fn get(&self, k: &str) -> Option<Vec<u8>> { self.0.get(k).cloned() }
-//! #     fn remove(&mut self, k: &str) -> Option<Vec<u8>> { self.0.remove(k) }
-//! # }
+//! # include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dummy_llm.rs"));
+//! # include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/map_registry.rs"));
+//! # type MyLlm = DummyLlm;
 //!
 //! thread_local! {
 //!     static SERVER: ModelServer<MyLlm> = ModelServer::new();
 //!     // A StorageRegistry holding the weights and tokenizer, e.g. a StableBTreeMap
-//!     static REGISTRIES: RefCell<Reg> = RefCell::new(Reg::default());
+//!     static REGISTRIES: RefCell<MapRegistry> = RefCell::new(MapRegistry::default());
 //! }
 //!
 //! // Use the macro to generate all endpoints
@@ -54,6 +26,7 @@
 //!     tokenizer_key: "tokenizer",
 //!     get_tokenizer: |model| Box::new(model.tokenizer_handle())
 //! );
+//! # fn main() {}
 //! ```
 
 #![cfg(all(feature = "text-generation", feature = "storage"))]
@@ -102,38 +75,10 @@ impl<M: AutoregressiveModel> ModelServer<M> {
     /// ```rust,no_run
     /// # use ic_dev_kit_rs::model_server::ModelServer;
     /// # use std::cell::RefCell;
-    /// # use ic_dev_kit_rs::candle::{CandleModel, ModelMetadata};
-    /// # use ic_dev_kit_rs::text_generation::{AutoregressiveModel, GenerationConfig, TokenizerHandle};
-    /// # use ic_dev_kit_rs::storage::StorageRegistry;
-    /// # use std::collections::HashMap;
-    /// # struct MyLlm;
-    /// # impl CandleModel for MyLlm {
-    /// #     fn load(_: Vec<u8>, _: Option<Vec<u8>>) -> Result<Self, String> { Ok(MyLlm) }
-    /// #     fn metadata(&self) -> ModelMetadata {
-    /// #         ModelMetadata { name: String::new(), version: String::new(), architecture: String::new(), parameters: 0, context_length: None }
-    /// #     }
-    /// #     fn reset(&mut self) {}
-    /// # }
-    /// # impl AutoregressiveModel for MyLlm {
-    /// #     fn init_generation(&mut self, _: String, _: &dyn TokenizerHandle, _: &GenerationConfig) -> Result<String, String> { Ok(String::new()) }
-    /// #     fn generate_next_token(&mut self, _: &dyn TokenizerHandle) -> Result<String, String> { Ok(String::new()) }
-    /// #     fn is_generation_complete(&self) -> bool { true }
-    /// #     fn generated_token_count(&self) -> usize { 0 }
-    /// # }
-    /// # struct Tok;
-    /// # impl TokenizerHandle for Tok {
-    /// #     fn encode(&self, _: &str) -> Result<Vec<u32>, String> { Ok(vec![]) }
-    /// #     fn decode(&self, _: &[u32]) -> Result<String, String> { Ok(String::new()) }
-    /// #     fn vocab_size(&self) -> usize { 0 }
-    /// # }
-    /// # impl MyLlm { fn tokenizer_handle(&self) -> Tok { Tok } }
-    /// # #[derive(Default)] struct Reg(HashMap<String, Vec<u8>>);
-    /// # impl StorageRegistry for Reg {
-    /// #     fn insert(&mut self, k: String, v: Vec<u8>) { self.0.insert(k, v); }
-    /// #     fn get(&self, k: &str) -> Option<Vec<u8>> { self.0.get(k).cloned() }
-    /// #     fn remove(&mut self, k: &str) -> Option<Vec<u8>> { self.0.remove(k) }
-    /// # }
-    /// # fn example(server: &ModelServer<MyLlm>, registry: &RefCell<Reg>) -> Result<(), String> {
+    /// # include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dummy_llm.rs"));
+    /// # include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/map_registry.rs"));
+    /// # type MyLlm = DummyLlm;
+    /// # fn example(server: &ModelServer<MyLlm>, registry: &RefCell<MapRegistry>) -> Result<(), String> {
     /// server.setup_from_storage(
     ///     registry,
     ///     "model_weights",
@@ -142,6 +87,7 @@ impl<M: AutoregressiveModel> ModelServer<M> {
     /// )?;
     /// # Ok(())
     /// # }
+    /// # fn main() {}
     /// ```
     pub fn setup_from_storage<R: StorageRegistry>(
         &self,
@@ -322,41 +268,13 @@ pub struct ModelInfo {
 /// ```rust,no_run
 /// # use ic_dev_kit_rs::model_server::ModelServer;
 /// # use std::cell::RefCell;
-/// # use ic_dev_kit_rs::candle::{CandleModel, ModelMetadata};
-/// # use ic_dev_kit_rs::text_generation::{AutoregressiveModel, GenerationConfig, TokenizerHandle};
-/// # use ic_dev_kit_rs::storage::StorageRegistry;
-/// # use std::collections::HashMap;
-/// # struct MyLlm;
-/// # impl CandleModel for MyLlm {
-/// #     fn load(_: Vec<u8>, _: Option<Vec<u8>>) -> Result<Self, String> { Ok(MyLlm) }
-/// #     fn metadata(&self) -> ModelMetadata {
-/// #         ModelMetadata { name: String::new(), version: String::new(), architecture: String::new(), parameters: 0, context_length: None }
-/// #     }
-/// #     fn reset(&mut self) {}
-/// # }
-/// # impl AutoregressiveModel for MyLlm {
-/// #     fn init_generation(&mut self, _: String, _: &dyn TokenizerHandle, _: &GenerationConfig) -> Result<String, String> { Ok(String::new()) }
-/// #     fn generate_next_token(&mut self, _: &dyn TokenizerHandle) -> Result<String, String> { Ok(String::new()) }
-/// #     fn is_generation_complete(&self) -> bool { true }
-/// #     fn generated_token_count(&self) -> usize { 0 }
-/// # }
-/// # struct Tok;
-/// # impl TokenizerHandle for Tok {
-/// #     fn encode(&self, _: &str) -> Result<Vec<u32>, String> { Ok(vec![]) }
-/// #     fn decode(&self, _: &[u32]) -> Result<String, String> { Ok(String::new()) }
-/// #     fn vocab_size(&self) -> usize { 0 }
-/// # }
-/// # impl MyLlm { fn tokenizer_handle(&self) -> Tok { Tok } }
-/// # #[derive(Default)] struct Reg(HashMap<String, Vec<u8>>);
-/// # impl StorageRegistry for Reg {
-/// #     fn insert(&mut self, k: String, v: Vec<u8>) { self.0.insert(k, v); }
-/// #     fn get(&self, k: &str) -> Option<Vec<u8>> { self.0.get(k).cloned() }
-/// #     fn remove(&mut self, k: &str) -> Option<Vec<u8>> { self.0.remove(k) }
-/// # }
+/// # include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/dummy_llm.rs"));
+/// # include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/map_registry.rs"));
+/// # type MyLlm = DummyLlm;
 /// # fn is_authorized() -> Result<(), String> { ic_dev_kit_rs::auth::is_authorized() }
 /// thread_local! {
 ///     static SERVER: ModelServer<MyLlm> = ModelServer::new();
-///     static REGISTRIES: RefCell<Reg> = RefCell::new(Reg::default());
+///     static REGISTRIES: RefCell<MapRegistry> = RefCell::new(MapRegistry::default());
 /// }
 ///
 /// ic_dev_kit_rs::generate_model_endpoints!(
@@ -367,6 +285,7 @@ pub struct ModelInfo {
 ///     get_tokenizer: |model| Box::new(model.tokenizer_handle()),
 ///     generate_guard: "is_authorized"
 /// );
+/// # fn main() {}
 /// ```
 #[macro_export]
 macro_rules! generate_model_endpoints {

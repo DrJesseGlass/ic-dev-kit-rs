@@ -13,91 +13,15 @@
     feature = "text-generation"
 ))]
 
-use ic_dev_kit_rs::candle::{CandleModel, ModelMetadata};
 use ic_dev_kit_rs::model_server::ModelServer;
-use ic_dev_kit_rs::storage::StorageRegistry;
-use ic_dev_kit_rs::text_generation::{AutoregressiveModel, GenerationConfig, TokenizerHandle};
 use std::cell::RefCell;
-use std::collections::HashMap;
 
-struct DummyModel;
-
-impl CandleModel for DummyModel {
-    fn load(_weights: Vec<u8>, _config: Option<Vec<u8>>) -> Result<Self, String> {
-        Ok(Self)
-    }
-
-    fn metadata(&self) -> ModelMetadata {
-        ModelMetadata {
-            name: "dummy".to_string(),
-            version: "0".to_string(),
-            architecture: "test".to_string(),
-            parameters: 0,
-            context_length: None,
-        }
-    }
-
-    fn reset(&mut self) {}
-}
-
-impl AutoregressiveModel for DummyModel {
-    fn init_generation(
-        &mut self,
-        _prompt: String,
-        _tokenizer: &dyn TokenizerHandle,
-        _config: &GenerationConfig,
-    ) -> Result<String, String> {
-        Ok(String::new())
-    }
-
-    fn generate_next_token(&mut self, _tokenizer: &dyn TokenizerHandle) -> Result<String, String> {
-        Ok(String::new())
-    }
-
-    fn is_generation_complete(&self) -> bool {
-        true
-    }
-
-    fn generated_token_count(&self) -> usize {
-        0
-    }
-}
-
-struct DummyTokenizer;
-
-impl TokenizerHandle for DummyTokenizer {
-    fn encode(&self, _text: &str) -> Result<Vec<u32>, String> {
-        Ok(Vec::new())
-    }
-
-    fn decode(&self, _tokens: &[u32]) -> Result<String, String> {
-        Ok(String::new())
-    }
-
-    fn vocab_size(&self) -> usize {
-        0
-    }
-}
-
-#[derive(Default)]
-struct MapRegistry(HashMap<String, Vec<u8>>);
-
-impl StorageRegistry for MapRegistry {
-    fn insert(&mut self, key: String, value: Vec<u8>) {
-        self.0.insert(key, value);
-    }
-
-    fn get(&self, key: &str) -> Option<Vec<u8>> {
-        self.0.get(key).cloned()
-    }
-
-    fn remove(&mut self, key: &str) -> Option<Vec<u8>> {
-        self.0.remove(key)
-    }
-}
+// Shared with the doctests; see the fixture files for the trait impls.
+include!("fixtures/dummy_llm.rs");
+include!("fixtures/map_registry.rs");
 
 thread_local! {
-    static SERVER: ModelServer<DummyModel> = const { ModelServer::new() };
+    static SERVER: ModelServer<DummyLlm> = const { ModelServer::new() };
     static REGISTRY: RefCell<MapRegistry> = RefCell::new(MapRegistry::default());
 }
 
@@ -110,7 +34,7 @@ ic_dev_kit_rs::generate_model_endpoints!(
     registry: REGISTRY,
     weights_key: "weights",
     tokenizer_key: "tokenizer",
-    get_tokenizer: |_model| Box::new(DummyTokenizer)
+    get_tokenizer: |model| Box::new(model.tokenizer_handle())
 );
 
 ic_cdk::export_candid!();
@@ -119,25 +43,42 @@ ic_cdk::export_candid!();
 fn all_macro_endpoints_export_to_candid() {
     let did = __export_service();
 
+    // Every endpoint the four macros emit (see the README's Macros table).
     for method in [
         // auth
         "authorize_principal",
         "deauthorize_principal",
         "get_authorized_principals",
+        "check_principal_authorized",
+        "get_authorized_count",
         // telemetry (Canistergeek camelCase names plus our own)
         "getCanistergeekInformation",
         "updateCanistergeekInformation",
         "getCanisterLog",
         "authorize_monitoring",
-        // uploads + storage integration
+        "deauthorize_monitoring",
+        "get_monitoring_principals",
+        // uploads
         "append_chunk",
+        "buffer_size",
+        "clear_buffer",
         "append_parallel_chunk",
+        "parallel_chunks_complete",
+        "missing_chunks",
+        "clear_parallel_chunks",
+        "parallel_chunk_count",
+        "get_storage_status",
+        // uploads: storage integration
         "save_buffer_to_storage",
+        "save_parallel_to_storage",
         "storage_key_exists",
+        "get_storage_size",
+        "delete_storage_key",
         // model server
         "setup_model",
         "generate",
         "reset_generation",
+        "is_model_loaded",
         "get_model_info",
     ] {
         assert!(

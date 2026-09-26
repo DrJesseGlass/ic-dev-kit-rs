@@ -62,3 +62,18 @@ jobs:
         run: cargo check --target wasm32-unknown-unknown --all-features
         env:
           RUSTFLAGS: --cfg getrandom_backend="custom"
+
+  msrv:
+    name: MSRV (Rust 1.94, ${{ matrix.os }})
+    # Keep in sync with `rust-version` in Cargo.toml. The ARM runner matters:
+    # candle-core's NEON code is what sets the floor.
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.94
+      - uses: Swatinem/rust-cache@v2
+      - name: Check all features on the declared MSRV
+        run: cargo check --all-features --locked

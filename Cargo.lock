@@ -263,11 +263,12 @@ dependencies = [
 [[package]]
 name = "canistergeek_ic_rust"
 version = "0.6.0"
-source = "git+https://github.com/DrJesseGlass/canistergeek_ic_rust?tag=v0.6.0#8e0c451d04532360d0e126566823ecf7c7eb5e13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10338f73058e970bf666fb0fe1ed59fb6e139f5175c54ce2369c917f2514b2b2"
 dependencies = [
  "candid",
  "chrono",
- "ic-cdk",
+ "ic-cdk 0.19.0",
  "num-bigint",
  "num-traits",
  "serde",
@@ -882,13 +883,32 @@ dependencies = [
 
 [[package]]
 name = "ic-cdk"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "818d6d5416a8f0212e1b132703b0da51e36c55f2b96677e96f2bbe7702e1bd85"
+dependencies = [
+ "candid",
+ "ic-cdk-executor",
+ "ic-cdk-macros 0.19.0",
+ "ic-error-types",
+ "ic-management-canister-types",
+ "ic0",
+ "pin-project-lite",
+ "serde",
+ "serde_bytes",
+ "slotmap",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "ic-cdk"
 version = "0.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc6ad46670baa42b9d802e46cb0741e5da2d747b5b74b9ac8019aec9388b05b2"
 dependencies = [
  "candid",
  "ic-cdk-executor",
- "ic-cdk-macros",
+ "ic-cdk-macros 0.20.3",
  "ic-error-types",
  "ic0",
  "pin-project-lite",
@@ -905,6 +925,19 @@ dependencies = [
  "ic0",
  "slotmap",
  "smallvec",
+]
+
+[[package]]
+name = "ic-cdk-macros"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66dad91a214945cb3605bc9ef6901b87e2ac41e3624284c2cabba49d43aa4f43"
+dependencies = [
+ "candid",
+ "darling 0.20.11",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -929,7 +962,7 @@ dependencies = [
  "candle-nn",
  "candle-transformers",
  "canistergeek_ic_rust",
- "ic-cdk",
+ "ic-cdk 0.20.3",
  "ic-stable-structures",
  "serde",
  "serde_json",
@@ -946,6 +979,17 @@ dependencies = [
  "serde",
  "strum",
  "strum_macros",
+]
+
+[[package]]
+name = "ic-management-canister-types"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3149217e24186df3f13dc45eee14cdb3e5cad07d0b2b67bd53555c1c55462957"
+dependencies = [
+ "candid",
+ "serde",
+ "serde_bytes",
 ]
 
 [[package]]

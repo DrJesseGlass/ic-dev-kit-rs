@@ -6,8 +6,15 @@ description = "Rust toolkit for IC development - standardizes HTTP generation, l
 authors = ["Jesse Glass <dr.jesse.glass@gmail.com>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/drjesseglass/ic-dev-kit-rs"
+readme = "README.md"
 keywords = ["internet-computer", "ic", "dfinity", "canister", "blockchain"]
 categories = ["web-programming", "api-bindings"]
+# candle-core 0.11 needs 1.94 on aarch64 (stabilized NEON f16 intrinsics);
+# ic-cdk 0.20 alone would allow 1.88. The `msrv` CI job checks this.
+rust-version = "1.94"
+# Keep CI config and the example canister workspace out of the published
+# tarball.
+exclude = [".github/", "examples/"]
 
 [dependencies]
 # IC dependencies (keep working versions)
@@ -21,9 +28,14 @@ serde_json = "1.0"
 thiserror = "2.0"
 
 # Telemetry
-# Upstream canistergeek_ic_rust still pins ic-cdk 0.19 (as of 0.6.0); use the
-# fork migrated to ic-cdk 0.20, pinned to an immutable tag for reproducibility.
-canistergeek_ic_rust = { git = "https://github.com/DrJesseGlass/canistergeek_ic_rust", tag = "v0.6.0", optional = true }
+# crates.io canistergeek_ic_rust 0.6.0 still requires ic-cdk ^0.19, so the
+# `telemetry` feature links a private ic-cdk 0.19 next to our 0.20. That is
+# safe: canistergeek exposes no ic-cdk types, only calls four stateless ic-cdk
+# API wrappers (debug_print, time, canister_cycle_balance, stable_size), and both ic-cdk versions share one ic-cdk-executor. Measured cost is ~400
+# bytes of wasm. The ic-cdk 0.20 migration is a two-line patch
+# (github.com/DrJesseGlass/canistergeek_ic_rust, PR pending upstream); switch
+# to the upstream release that requires ic-cdk 0.20 once it exists.
+canistergeek_ic_rust = { version = "0.6", optional = true }
 ic-cdk = "0.20.3"
 
 # Storage - optional, behind feature flag
@@ -45,3 +57,8 @@ telemetry = ["canistergeek_ic_rust"]
 [lib]
 # Library only: the consumer's canister crate is the cdylib.
 crate-type = ["rlib"]
+
+[package.metadata.docs.rs]
+# Most modules (telemetry, storage, candle, text_generation, model_server) are
+# feature-gated; document them all on docs.rs.
+all-features = true

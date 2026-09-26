@@ -300,6 +300,13 @@ macro_rules! generate_model_endpoints {
             $crate::auth::is_authorized()
         }
 
+        // `ic_cdk::export_candid!` re-parses stringified endpoint signatures
+        // and cannot parse `$crate`, so the request/response types are bound
+        // to local aliases first. Invoke `export_candid!` in this module.
+        type __ModelInferenceRequest = $crate::model_server::InferenceRequest;
+        type __ModelInferenceResponse = $crate::model_server::InferenceResponse;
+        type __ModelInfo = $crate::model_server::ModelInfo;
+
         #[ic_cdk::update(guard = "__model_admin_guard")]
         pub fn setup_model() -> Result<(), String> {
             $crate::__private::collect_metrics();
@@ -319,9 +326,7 @@ macro_rules! generate_model_endpoints {
         }
 
         #[ic_cdk::update(guard = $generate_guard)]
-        pub fn generate(
-            request: $crate::model_server::InferenceRequest,
-        ) -> $crate::model_server::InferenceResponse {
+        pub fn generate(request: __ModelInferenceRequest) -> __ModelInferenceResponse {
             $crate::__private::collect_metrics();
 
             let config = request.config.unwrap_or_default();
@@ -330,7 +335,7 @@ macro_rules! generate_model_endpoints {
                 Ok(response) => response.into(),
                 Err(e) => {
                     $crate::__private::log_error(format!("Generation failed: {}", e));
-                    $crate::model_server::InferenceResponse::failure(e)
+                    __ModelInferenceResponse::failure(e)
                 }
             })
         }
@@ -346,8 +351,8 @@ macro_rules! generate_model_endpoints {
         }
 
         #[ic_cdk::query]
-        pub fn get_model_info() -> $crate::model_server::ModelInfo {
-            $server.with(|s| $crate::model_server::ModelInfo {
+        pub fn get_model_info() -> __ModelInfo {
+            $server.with(|s| __ModelInfo {
                 loaded: s.is_loaded(),
                 current_tokens: s.token_count(),
                 metadata: s.metadata(),

@@ -29,20 +29,21 @@ scope, in particular:
   the one `save_to_bytes` wrote;
 - `telemetry` (`telemetry` feature): metrics or logs read by a caller who
   is not a controller, an `auth` admin or a monitoring principal
-  (`is_monitoring_authorized`), or the monitoring list changed by one who
-  is not a controller or an `auth` admin (`is_monitoring_admin`);
-- the generated endpoints: any endpoint from `generate_upload_endpoints!`,
-  `generate_model_endpoints!` or `export_telemetry_endpoints!` reachable
-  without the guard the macro was given, and `setup_model` or
-  `reset_generation` reachable by a caller `auth` does not authorize;
+  (`is_monitoring_authorized`), or the monitoring list changed past the
+  admin guard, which by default admits controllers and `auth` admins
+  (`is_monitoring_admin`);
+- the generated endpoints: an upload, clear or registry endpoint from
+  `generate_upload_endpoints!`, or `generate` from
+  `generate_model_endpoints!`, reachable without the guard the macro was
+  given, and `setup_model` or `reset_generation` reachable by a caller
+  `auth` does not authorize;
 - `large_objects`: one owner reading, changing or clearing another owner's
   buffers, or bytes buffered past the per-owner or the total cap
   (`set_max_bytes_per_owner`, `set_max_total_bytes`);
 - `http`: a request that `Router` dispatches to a handler whose route does
-  not match its method and path, a path or header that `extract_path`,
-  `matches_pattern`, `extract_params` or `get_header` reads differently
-  than the gateway that delivered it, or a streaming token the types
-  decode to something other than what was encoded;
+  not match its method and path, a path `matches_pattern` accepts that its
+  pattern does not describe, or a streaming token the types decode to
+  something other than what was encoded;
 - `storage` (`storage` feature): a value `load_candid` returns that was not
   the one saved under that key;
 - a trap on untrusted input in any of the above, or in `text_generation`
@@ -55,6 +56,10 @@ scope, in particular:
 - The public arms of the macros. `generate_upload_endpoints!()` with no
   guard and `generate_model_endpoints!` without `generate_guard` are open
   to everyone, as the README says (Macros).
+- The status queries `generate_upload_endpoints!` generates (`buffer_size`,
+  `parallel_chunks_complete`, `missing_chunks`, `parallel_chunk_count`,
+  `get_storage_status`) carry no guard in any arm. They report only the
+  caller's own buffers. One that reports another owner's is a report.
 - The functions under the macros check nobody. `auth::add_principal`,
   `telemetry::add_monitoring_principal` and every `large_objects` function
   act on the principal they are handed; calling them from an unguarded

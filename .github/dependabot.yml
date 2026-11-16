@@ -1,0 +1,106 @@
+# Dependabot: security updates for every advisory against a dependency in
+# either Cargo.lock (GitHub's advisory database includes RustSec), and
+# routine version updates on the schedules below. Each update is a pull
+# request, tested by ci.yml.
+#
+# This is a library, so Cargo.lock decides only what this repo's own tests,
+# the MSRV job and the release workflow (both `--locked`) run against; what
+# a consumer resolves is decided by the requirements in Cargo.toml. A pull
+# request that touches only Cargo.lock needs no release. One that changes a
+# requirement in Cargo.toml reaches consumers only with a release, and a
+# release changes the module hash of every canister that takes it (ic-git).
+#
+# Dependabot pushes its pull requests to branches named dependabot/<...>.
+# Git cannot create those while a branch named plainly `dependabot` exists
+# (a ref cannot be both a file and a directory), and Dependabot then opens
+# nothing, silently from the repo's side. Never name a branch `dependabot`;
+# the job log under Insights > Dependency graph > Dependabot shows the
+# failure when it happens.
+version: 2
+updates:
+  # The crate itself.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps
+    groups:
+      # Patch and minor bumps arrive as one pull request a week rather than
+      # one per crate; a major bump, or a security update, comes on its own.
+      cargo-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      # All of these are part of this crate's public API, and all are 0.x,
+      # where a minor bump is a breaking one. Moving any of them is a
+      # breaking release made by hand, so only patches come through.
+      #
+      # ic-cdk, candid, ic-stable-structures: the endpoint macros expand to
+      # `ic_cdk` attributes in the consumer's crate, CandidType is derived
+      # on the public types, and StorageRegistry is implemented for
+      # StableBTreeMap. Consumers pin their own copies to the versions here
+      # (ic-git: canisters/*/Cargo.toml).
+      - dependency-name: ic-cdk
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: candid
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: ic-stable-structures
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      # canistergeek_ic_rust: re-exported as telemetry::canistergeek_ic_rust.
+      # 0.6 is also the release that still needs ic-cdk 0.19 (Cargo.toml);
+      # the move to one that takes 0.20 is made by hand, with the README
+      # note and the duplicate ic-cdk removed in the same change.
+      - dependency-name: canistergeek_ic_rust
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      # candle and tokenizers: their types are in the public helpers
+      # (candle::gguf, text_generation::tokenizer) and in every consumer's
+      # model implementation, the three candle crates release together,
+      # and candle-core is what sets `rust-version`.
+      - dependency-name: candle-core
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: candle-nn
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: candle-transformers
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: tokenizers
+        update-types: [version-update:semver-major, version-update:semver-minor]
+
+  # The example canister: its own workspace and lock, outside the published
+  # crate (Cargo.toml, `exclude`). It takes the crate by path, and ci.yml
+  # checks it on wasm32, so it stays on the versions the crate uses.
+  - package-ecosystem: cargo
+    directory: /examples/simple_counter
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: deps(example)
+    groups:
+      example:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: ic-cdk
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: candid
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: ic-stable-structures
+        update-types: [version-update:semver-major, version-update:semver-minor]
+
+  # The workflows' actions: release.yml publishes to crates.io on them.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns: ["*"]
+
+# Not covered, deliberately: `rust-version` in Cargo.toml and the toolchain
+# the `msrv` job in ci.yml installs. They are the same number and move by
+# hand together, when a dependency raises the floor. A lock update that
+# needs a newer compiler than that fails the `msrv` job, which is the
+# signal to hold it or raise both.

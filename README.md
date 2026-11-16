@@ -561,6 +561,15 @@ in `tests/fixtures/` and are `include!`d by the doctests too.
    native tests and wasm32 checks, and runs `cargo publish` using the
    `CARGO_REGISTRY_TOKEN` repository secret.
 
+## Reporting
+
+A bug: https://github.com/DrJesseGlass/ic-dev-kit-rs/issues/new.
+
+A security problem: privately, never in a public issue, at
+https://github.com/DrJesseGlass/ic-dev-kit-rs/security/advisories/new.
+[SECURITY.md](https://github.com/DrJesseGlass/ic-dev-kit-rs/blob/main/SECURITY.md)
+says what is in scope.
+
 ## License
 
 MIT OR Apache-2.0

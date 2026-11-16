@@ -66,6 +66,10 @@ updates:
         update-types: [version-update:semver-major, version-update:semver-minor]
       - dependency-name: tokenizers
         update-types: [version-update:semver-major, version-update:semver-minor]
+      # getrandom 0.4 is patched to a fork, by tag (Cargo.toml, the reason
+      # is there). The tag moves by hand, when the fork is rebased onto a
+      # new getrandom release or the patch is dropped.
+      - dependency-name: getrandom
 
   # The example canister: its own workspace and lock, outside the published
   # crate (Cargo.toml, `exclude`). It takes the crate by path, and ci.yml
@@ -98,9 +102,15 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+    ignore:
+      # Its refs are Rust toolchains, not releases of the action: `@stable`
+      # is a branch, and `@1.94` in the `msrv` job is the crate's MSRV.
+      # Dependabot reads the second as a version and bumps it to the newest
+      # numbered ref, which is not the MSRV and need not be a released Rust.
+      - dependency-name: dtolnay/rust-toolchain
 
 # Not covered, deliberately: `rust-version` in Cargo.toml and the toolchain
-# the `msrv` job in ci.yml installs. They are the same number and move by
-# hand together, when a dependency raises the floor. A lock update that
-# needs a newer compiler than that fails the `msrv` job, which is the
-# signal to hold it or raise both.
+# the `msrv` job in ci.yml installs (the ignore above). They are the same
+# number and move by hand together, when a dependency raises the floor. A
+# lock update that needs a newer compiler than that fails the `msrv` job,
+# which is the signal to hold it or raise both.

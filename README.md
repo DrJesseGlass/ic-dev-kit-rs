@@ -19,6 +19,23 @@ ic-dev-kit-rs = { version = "0.4", features = ["text-generation", "storage"] }
 
 Requires Rust 1.94 or newer (`candle-core` 0.11 needs it on aarch64).
 
+**Note on candle 0.11.1 + wasm:** candle-core 0.11.1 depends on zip 9, which
+enables getrandom's `wasm_js` feature on wasm32, and stock getrandom 0.4.3
+does not compile with that feature and the custom backend a canister needs
+(the wasm note below). A canister using the ML features needs one of:
+
+```toml
+# In the workspace Cargo.toml: getrandom 0.4.3 with that one conflict fixed.
+[patch.crates-io]
+getrandom = { git = "https://github.com/DrJesseGlass/getrandom", tag = "determinism-0.4.3.1" }
+```
+
+or candle held at 0.11.0 in its lock (`cargo update -p candle-core --precise
+0.11.0`, likewise `candle-nn` and `candle-transformers`), which keeps zip 8.
+Keep `--cfg getrandom_backend="custom"` either way. A `[patch]` in this crate
+cannot do it for you: Cargo applies patches only from the workspace being
+built.
+
 **Note on `telemetry`:** the published `canistergeek_ic_rust` still requires
 `ic-cdk` 0.19, so enabling `telemetry` links a private copy of ic-cdk 0.19
 next to your 0.20. Your code stays on 0.20; Canistergeek exposes no ic-cdk

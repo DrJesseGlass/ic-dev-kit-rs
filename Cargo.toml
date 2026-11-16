@@ -42,6 +42,12 @@ ic-cdk = "0.20.3"
 ic-stable-structures = { version = "0.7.2", optional = true }
 
 # Candle - optional, behind feature flag (published crates.io releases)
+# candle-core 0.11.1 moved zip from 8 to 9, and zip 9 enables getrandom's
+# `wasm_js` feature on every wasm32 target. Stock getrandom 0.4.3 does not
+# compile with that feature and `--cfg getrandom_backend="custom"` together,
+# and the custom backend is what a canister uses. The [patch.crates-io] entry
+# at the bottom of this file is what lets this repo build 0.11.1; a consumer
+# needs the same entry, or candle held at 0.11.0 in its lock (README).
 candle-core = { version = "0.11", default-features = false, optional = true }
 candle-nn = { version = "0.11", default-features = false, optional = true }
 candle-transformers = { version = "0.11", default-features = false, optional = true }
@@ -62,3 +68,15 @@ crate-type = ["rlib"]
 # Most modules (telemetry, storage, candle, text_generation, model_server) are
 # feature-gated; document them all on docs.rs.
 all-features = true
+
+# getrandom 0.4.3 with one fix this crate needs: `Error::WEB_CRYPTO` is only
+# named in `Display` when the wasm_js backend is the one compiled, so the
+# `wasm_js` feature zip 9 turns on no longer breaks the custom backend. The
+# fork also carries an opt-in `ic` backend, which nothing here selects.
+#
+# A [patch] applies only to the workspace being built: `cargo publish` strips
+# it, and a consumer's build never sees this one. Remove it, and the README
+# note, when a getrandom or zip release makes it unnecessary; the `wasm` CI
+# job without the patch is the test.
+[patch.crates-io]
+getrandom = { git = "https://github.com/DrJesseGlass/getrandom", tag = "determinism-0.4.3.1" }

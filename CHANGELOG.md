@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **candle / text-generation** - a fresh dependency resolution picked
+  candle-core 0.11.1, which cannot be built for `wasm32-unknown-unknown` with
+  the custom getrandom backend a canister needs (zip 9 enables getrandom's
+  `wasm_js` feature; getrandom 0.4.3 does not compile with both). The three
+  candle crates are now required at exactly `0.11.0`. A canister that also
+  depends on candle directly needs the same requirement.
+
+### Dependencies and tooling
+
+- Cargo.lock: candid 0.10.40, serde 1.0.229, serde_json 1.0.154, thiserror
+  2.0.21.
+- CI: `actions/checkout` v7. Dependabot no longer proposes candle updates or
+  changes to the `dtolnay/rust-toolchain` refs.
+
 ## [0.4.1] - 2026-09-26
 
 ### Fixed

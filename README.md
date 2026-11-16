@@ -19,6 +19,12 @@ ic-dev-kit-rs = { version = "0.4", features = ["text-generation", "storage"] }
 
 Requires Rust 1.94 or newer (`candle-core` 0.11 needs it on aarch64).
 
+**Note on candle versions:** the ML features require candle 0.11.0 exactly.
+candle-core 0.11.1 depends on zip 9, which enables getrandom's `wasm_js`
+feature on wasm32, and getrandom does not compile with that feature and the
+custom backend a canister needs (the wasm note below). If your canister
+depends on candle directly, use `=0.11.0` there too.
+
 **Note on `telemetry`:** the published `canistergeek_ic_rust` still requires
 `ic-cdk` 0.19, so enabling `telemetry` links a private copy of ic-cdk 0.19
 next to your 0.20. Your code stays on 0.20; Canistergeek exposes no ic-cdk

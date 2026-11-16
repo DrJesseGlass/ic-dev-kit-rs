@@ -42,9 +42,19 @@ ic-cdk = "0.20.3"
 ic-stable-structures = { version = "0.7.2", optional = true }
 
 # Candle - optional, behind feature flag (published crates.io releases)
-candle-core = { version = "0.11", default-features = false, optional = true }
-candle-nn = { version = "0.11", default-features = false, optional = true }
-candle-transformers = { version = "0.11", default-features = false, optional = true }
+# Held at exactly 0.11.0: candle-core 0.11.1 cannot be built for a canister.
+# It moves zip from 8 to 9, and zip 9 enables getrandom's `wasm_js` feature
+# on every wasm32 target. getrandom 0.4.3 does not compile with that feature
+# and `--cfg getrandom_backend="custom"` together (its Display arm for
+# Error::WEB_CRYPTO is gated on the feature, the constant on the backend),
+# and the custom backend is the only one a canister can use. Lift the three
+# together when zip stops enabling `wasm_js` or getrandom tolerates it; the
+# `wasm` CI job is the test. Until then Cargo.lock keeps zip 8.6.0, which
+# candle-core uses only to read .npz and .pth files, not on the GGUF path
+# this crate loads models through.
+candle-core = { version = "=0.11.0", default-features = false, optional = true }
+candle-nn = { version = "=0.11.0", default-features = false, optional = true }
+candle-transformers = { version = "=0.11.0", default-features = false, optional = true }
 tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"], optional = true }
 
 [features]

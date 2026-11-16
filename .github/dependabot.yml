@@ -58,18 +58,18 @@ updates:
       # (candle::gguf, text_generation::tokenizer) and in every consumer's
       # model implementation, the three candle crates release together,
       # and candle-core is what sets `rust-version`.
-      #
-      # candle is held entirely, patches included: Cargo.toml pins the three
-      # at =0.11.0 because 0.11.1 does not build for a canister (the reason
-      # is there). Go back to holding only major and minor when that pin is
-      # lifted. A security update for candle itself still comes; one for
-      # zip cannot, since the fixed zip is what 0.11.1 brings, so those
-      # alerts stay open until the pin goes.
       - dependency-name: candle-core
+        update-types: [version-update:semver-major, version-update:semver-minor]
       - dependency-name: candle-nn
+        update-types: [version-update:semver-major, version-update:semver-minor]
       - dependency-name: candle-transformers
+        update-types: [version-update:semver-major, version-update:semver-minor]
       - dependency-name: tokenizers
         update-types: [version-update:semver-major, version-update:semver-minor]
+      # getrandom 0.4 is patched to a fork, by tag (Cargo.toml, the reason
+      # is there). The tag moves by hand, when the fork is rebased onto a
+      # new getrandom release or the patch is dropped.
+      - dependency-name: getrandom
 
   # The example canister: its own workspace and lock, outside the published
   # crate (Cargo.toml, `exclude`). It takes the crate by path, and ci.yml

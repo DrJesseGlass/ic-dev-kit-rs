@@ -5,7 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.2] - 2026-11-16
+
+No API changes. Canisters using the `candle` or `text-generation` features
+should read the first item.
 
 ### Documentation
 
@@ -14,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   getrandom 0.4 is patched (zip 9 enables getrandom's `wasm_js` feature, and
   stock getrandom 0.4.3 does not compile with both). The note gives the
   `[patch.crates-io]` entry and the alternative of holding candle at 0.11.0.
+- `SECURITY.md`: where to report a vulnerability, what is in scope, and how
+  a fix ships. The README has a Reporting section pointing at it.
 
 ### Dependencies and tooling
 
